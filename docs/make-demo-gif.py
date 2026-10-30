@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASCADIA_ZIP = "https://github.com/microsoft/cascadia-code/releases/download/v2407.24/CascadiaCode-2407.24.zip"
@@ -377,27 +377,37 @@ def build_compare(fonts, v):
 # ---- docs/social-preview.png ------------------------------------------------------
 
 def build_social(fonts, v):
+    # White, minimal: title and description on the left, a terminal on the right
     W, H = 1280, 640
-    img = Image.new("RGB", (W * S, H * S), (15, 15, 18))
+    INK, SOFT, MUTED = (17, 17, 20), (70, 70, 78), (140, 140, 150)
+    img = Image.new("RGB", (W * S, H * S), (255, 255, 255))
     d = ImageDraw.Draw(img)
-    title = fonts.ui_font(96, bold=True)
-    sub = fonts.ui_font(34, bold=False)
-    small = fonts.ui_font(24, bold=False)
-    d.text((80 * S, 70 * S), "lindowin", font=title, fill=WHITE)
-    d.text((84 * S, 210 * S), "Headless Linux Docker for Windows", font=sub, fill=CYAN)
-    d.text((84 * S, 262 * S), "Terminal only. No GUI. One command.", font=small, fill=DIM)
+    x, y = 80, 196
+    d.text((x * S, y * S), "lindowin", font=fonts.ui_font(80, bold=True), fill=INK)
+    d.text(((x + 3) * S, (y + 118) * S), "Headless Linux Docker", font=fonts.ui_font(30, bold=False), fill=SOFT)
+    d.text(((x + 3) * S, (y + 158) * S), "for Windows.", font=fonts.ui_font(30, bold=False), fill=SOFT)
+    d.text(((x + 3) * S, (y + 214) * S), "Terminal only. No GUI. One command.", font=fonts.ui_font(19, bold=False), fill=MUTED)
     img = img.resize((W, H), Image.LANCZOS)
 
-    t = Terminal(fonts, 1120, 168, "Windows PowerShell", "PS C:\\> ")
+    t = Terminal(fonts, 620, 200, "Windows PowerShell", "PS C:\\> ")
     t.lines = [
         [(t.prompt, FG, False), ("docker run -d -p 8080:80 nginx", YELLOW, False)],
-        [("3f9c2b7e41d8a05e6c1f9b2d7a4e8c03b5d6f1a2e9c7b4d8f0a3e6c9b2d5f7a1", DIM, False)],
+        [("Unable to find image 'nginx:latest' locally", FG, False)],
+        [("Status: Downloaded newer image for nginx:latest", FG, False)],
+        [("3f9c2b7e41d8a05e6c1f9b2d7a4e8c03b5d6f1a2e9c7b4d8f0a3", DIM, False)],
         [(t.prompt, FG, False), ("curl.exe -s localhost:8080 | findstr title", YELLOW, False)],
         [("<title>Welcome to nginx!</title>", GREEN, True)],
         [(t.prompt, FG, False)],
     ]
-    pane = t.render()
-    img.paste(pane, (80, 392), t.mask())
+    px, py = 580, (H - t.h) // 2
+
+    # Soft shadow under the terminal
+    shadow = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(shadow).rounded_rectangle([px + 4, py + 14, px + t.w - 4, py + t.h + 10], radius=RADIUS, fill=70)
+    shadow = shadow.filter(ImageFilter.GaussianBlur(18))
+    img.paste((0, 0, 0), (0, 0, W, H), shadow)
+
+    img.paste(t.render(), (px, py), t.mask())
     return img
 
 
