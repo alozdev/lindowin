@@ -81,11 +81,34 @@ Docker Desktop does the same thing internally: a Linux VM in WSL runs `dockerd`,
 | Stop (frees RAM) | `wsl --terminate docker` |
 | Update | Run the installer again. Docker Engine inside WSL also gets automatic security updates. |
 | Shell inside the engine | `wsl -d docker` |
-| Uninstall | `%LOCALAPPDATA%\Programs\wsl-docker-engine\installer\uninstall.cmd` |
-
-The uninstaller **keeps** the distro (your containers, images and volumes) unless you run `uninstall.ps1 -RemoveDistro`.
+| Uninstall | See [Uninstall](#uninstall) |
 
 Containers with `restart: unless-stopped` or `restart: always` come back automatically when Docker starts at sign-in.
+
+## Uninstall
+
+The uninstaller lives in `%LOCALAPPDATA%\Programs\wsl-docker-engine\installer\`. Pick one:
+
+| I want to... | Run |
+|---|---|
+| **Remove everything**, including Docker Engine and all containers, images and volumes | `uninstall.cmd -RemoveDistro` (asks you to type the distro name to confirm) |
+| Remove only the Windows side and **keep the engine** with all its data | Double-click `uninstall.cmd` |
+| Remove the Windows side **and** the engine, without the confirmation prompt | `uninstall.cmd -RemoveDistro -Yes` |
+
+From PowerShell you can also run it directly:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\wsl-docker-engine\installer\uninstall.ps1" -RemoveDistro
+```
+
+What gets removed from Windows: `docker.exe`, the compose/buildx plugins it installed, the pipe relay, the sign-in launcher and the PATH / environment changes. Plugins you installed yourself are left alone.
+
+**Before removing the distro:**
+
+- **Stop your apps first.** Run `docker compose down` in each project so databases shut down cleanly.
+- **Bind-mounted data is safe.** Folders from Windows, like `./data`, live on your Windows disk and are never touched.
+- **Named volumes are deleted.** They live inside the distro. Back them up first if you need them, for example with `docker run --rm -v myvol:/v -v /c/backup:/b alpine tar czf /b/myvol.tgz -C /v .`.
+- **Reinstalling is easy.** Run the installer again, then `docker compose up -d` in each project. Bind-mounted data comes back as it was.
 
 ## Good to know
 

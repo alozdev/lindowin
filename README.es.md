@@ -81,11 +81,34 @@ Docker Desktop hace lo mismo por dentro: una máquina Linux en WSL corre `docker
 | Apagar (libera RAM) | `wsl --terminate docker` |
 | Actualizar | Ejecuta el instalador otra vez. Además, Docker Engine en WSL recibe actualizaciones de seguridad automáticas. |
 | Terminal dentro del motor | `wsl -d docker` |
-| Desinstalar | `%LOCALAPPDATA%\Programs\wsl-docker-engine\installer\uninstall.cmd` |
-
-El desinstalador **conserva** la distribución (tus contenedores, imágenes y volúmenes), salvo que uses `uninstall.ps1 -RemoveDistro`.
+| Desinstalar | Ver [Desinstalación](#desinstalación) |
 
 Los contenedores con `restart: unless-stopped` o `restart: always` vuelven a arrancar solos cuando Docker inicia al iniciar sesión.
+
+## Desinstalación
+
+El desinstalador está en `%LOCALAPPDATA%\Programs\wsl-docker-engine\installer\`. Elige una opción:
+
+| Quiero... | Ejecuta |
+|---|---|
+| **Quitar todo**, incluido Docker Engine y todos los contenedores, imágenes y volúmenes | `uninstall.cmd -RemoveDistro` (te pide escribir el nombre de la distribución para confirmar) |
+| Quitar solo la parte de Windows y **conservar el engine** con todos sus datos | Doble clic en `uninstall.cmd` |
+| Quitar la parte de Windows **y** el engine, sin pedir confirmación | `uninstall.cmd -RemoveDistro -Yes` |
+
+Desde PowerShell también lo puedes ejecutar directamente:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\wsl-docker-engine\installer\uninstall.ps1" -RemoveDistro
+```
+
+Lo que se quita de Windows: `docker.exe`, los plugins de compose y buildx que instaló, el relay, el arrancador y los cambios al PATH y a las variables de entorno. Los plugins que hayas instalado tú no se tocan.
+
+**Antes de borrar la distribución:**
+
+- **Apaga tus apps primero.** Ejecuta `docker compose down` en cada proyecto para que las bases de datos cierren limpio.
+- **Los datos en carpetas montadas están a salvo.** Las carpetas de Windows, como `./data`, viven en tu disco de Windows y nunca se tocan.
+- **Los volúmenes con nombre se borran.** Viven dentro de la distribución. Respáldalos antes si los necesitas, por ejemplo con `docker run --rm -v mivol:/v -v /c/respaldo:/b alpine tar czf /b/mivol.tgz -C /v .`.
+- **Reinstalar es fácil.** Ejecuta el instalador otra vez y luego `docker compose up -d` en cada proyecto. Los datos de las carpetas montadas vuelven tal cual.
 
 ## Bueno saber
 
