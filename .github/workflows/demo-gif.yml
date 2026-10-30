@@ -1,0 +1,56 @@
+# Keeps docs/demo.gif up to date with the latest Docker / compose / buildx / WSL
+# versions. Runs weekly; commits only when a version changed.
+name: Update demo GIF
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"        # Mondays 06:00 UTC
+  workflow_dispatch:            # "Run workflow" button
+  push:
+    branches: [main]
+    paths:
+      - docs/make-demo-gif.py
+      - install.ps1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: demo-gif
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: windows-latest     # has Segoe UI, used for the window title bar
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow
+        run: python -m pip install --disable-pip-version-check "pillow>=11,<14"
+
+      - name: Render GIF
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python docs/make-demo-gif.py
+
+      - name: Commit if something changed
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && git diff --quiet -- docs/demo-versions.json; then
+            echo "No new versions, nothing to do."
+            exit 0
+          fi
+          if [ -z "$(git status --porcelain -- docs/)" ]; then
+            echo "GIF unchanged."
+            exit 0
+          fi
+          summary=$(python -c "import json; v=json.load(open('docs/demo-versions.json')); print(f\"Docker {v['docker']}, compose {v['compose']}, buildx {v['buildx']}, WSL {v['wsl']}\")")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/demo.gif docs/demo-versions.json
+          git commit -m "Update demo GIF ($summary)"
+          git push

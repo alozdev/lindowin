@@ -1,0 +1,9 @@
+{
+  "buildx": "v0.38.1",
+  "compose": "v5.6.1",
+  "docker": "29.9.2",
+  "docker_cli_build": "a82e528",
+  "docker_engine_build": "0367cbe",
+  "ubuntu": "Ubuntu-24.04",
+  "wsl": "3.0.3"
+}
