@@ -2,6 +2,8 @@
 
 **Docker on Windows without Docker Desktop.** Use `docker` and `docker compose` from cmd / PowerShell / any terminal, just like with Docker Desktop, but with no GUI, no license restrictions and a much lighter footprint.
 
+![From no Docker to docker run hello-world with one command](docs/demo.gif)
+
 It installs the open-source **Docker Engine** inside WSL 2, the **official Docker CLI** for Windows, and a tiny relay that exposes the engine on `\\.\pipe\docker_engine`, the same endpoint Docker Desktop uses. Every tool that talks to Docker Desktop (the `docker` CLI, compose, buildx, VS Code, Testcontainers, SDKs) works without extra configuration.
 
 [Español](README.es.md)
