@@ -1,12 +1,35 @@
-# wsl-docker-engine
+# lindowin
 
-**Docker en Windows sin Docker Desktop.** Usa `docker` y `docker compose` desde cmd, PowerShell o cualquier terminal, igual que con Docker Desktop, pero sin interfaz gráfica, sin restricciones de licencia y mucho más ligero.
+**Docker de Linux para Windows, sin interfaz.** Solo terminal. Sin GUI. Un comando.
 
-![De no tener Docker a docker run hello-world con un solo comando](docs/demo.gif)
+`docker run nginx` funciona tal cual, en Windows 10/11 y en Windows Server, incluso Server Core.
 
-Instala el **Docker Engine** open source dentro de WSL 2, el **CLI oficial de Docker** para Windows y un pequeño relay que expone el motor en `\\.\pipe\docker_engine`, la misma conexión que usa Docker Desktop. Todo lo que funciona con Docker Desktop (el CLI `docker`, compose, buildx, VS Code, Testcontainers, SDKs) funciona sin configurar nada extra.
+![De no tener Docker a nginx funcionando, con un comando](docs/demo.gif)
 
 [English](README.md)
+
+## Por qué lindowin
+
+- 🐧 **Contenedores Linux de verdad.** `nginx`, `postgres`, `redis`... cualquier imagen de Docker Hub. Incluso en Windows Server, donde el Docker nativo solo corre contenedores Windows.
+- 💸 **Gratis para empresas.** Docker Desktop exige suscripción de pago a empresas de más de 250 empleados o más de 10 millones de dólares de ingresos. Aquí todo es open source.
+- 🪶 **Sin interfaz.** Sin app en la bandeja ni ventanas en segundo plano. Menos de 1 GB de RAM en reposo, y cabe en Server Core.
+- 🌐 **Puertos como en Linux.** `80:80` se alcanza desde tu red y `127.0.0.1:80:80` solo desde tu PC. TCP y UDP.
+- 🔌 **Funciona con tus herramientas.** Usa el mismo `\.\pipe\docker_engine` que Docker Desktop, así que el CLI de `docker`, compose, buildx, VS Code, Testcontainers y los SDK funcionan sin configurar nada.
+- 🔁 **Arranca solo.** Al iniciar sesión en una PC, y al encender en un servidor (sin iniciar sesión).
+
+## Comparación
+
+| | lindowin | Docker Desktop | Docker nativo en Windows Server |
+|---|:---:|:---:|:---:|
+| Imágenes Linux (`nginx`, `postgres`...) | ✅ | ✅ | ❌ solo imágenes Windows |
+| Gratis para empresas | ✅ | ❌ de pago desde 250 personas / 10 M USD | ✅ |
+| Windows Server / Server Core | ✅ | ❌ no soportado | ✅ |
+| Sin interfaz, arranca sin iniciar sesión | ✅ | ❌ | ✅ |
+| CLI oficial de `docker`, compose, buildx | ✅ | ✅ | ✅ |
+
+![Windows Server 2022: el Docker nativo no puede correr nginx, lindowin sí](docs/compare.gif)
+
+Por dentro instala el **Docker Engine** open source dentro de WSL 2, el **CLI oficial de Docker** para Windows y un pequeño relay entre los dos. [Cómo funciona](#cómo-funciona).
 
 ---
 
@@ -15,24 +38,29 @@ Instala el **Docker Engine** open source dentro de WSL 2, el **CLI oficial de Do
 **Opción 1: un comando.** Abre PowerShell (no hace falta administrador) y pega:
 
 ```powershell
-irm https://raw.githubusercontent.com/alozdev/wsl-docker-engine/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex
 ```
 
-**Opción 2: doble clic.** [Descarga el ZIP](https://github.com/alozdev/wsl-docker-engine/archive/refs/heads/main.zip), descomprímelo y haz doble clic en **`install.cmd`**.
+**Opción 2: doble clic.** [Descarga el ZIP](https://github.com/alozdev/lindowin/archive/refs/heads/main.zip), descomprímelo y haz doble clic en **`install.cmd`**.
 
 Después abre una terminal **nueva**:
 
 ```
-docker run --rm hello-world
+docker run -d -p 8080:80 nginx
 ```
+
+Luego abre http://localhost:8080 en tu navegador.
 
 La primera vez tarda unos minutos, porque descarga Ubuntu y Docker. El instalador se encarga de todo:
 
-- **Si no tienes WSL**, lo instala. Windows pide permiso de administrador **una sola vez**. Si hace falta reiniciar, el instalador **continúa solo** cuando vuelves a iniciar sesión.
+- **Si no tienes WSL**, lo instala. Si hace falta reiniciar, el instalador **continúa solo** cuando vuelves a iniciar sesión.
 - **Distribución:** crea una distribución de WSL llamada `docker` (Ubuntu 24.04) e instala Docker Engine con el script oficial. Arranca solo con systemd.
 - **Herramientas de Windows:** instala `docker.exe`, `docker compose` y `docker buildx` desde sus fuentes oficiales. Compose y buildx se comparan contra los checksums publicados.
-- **Inicio de sesión:** Docker arranca automáticamente al iniciar sesión en Windows.
+- **Puertos:** los puertos publicados funcionan [como en Linux](#puertos-publicados): `80:80` se alcanza desde tu red y `127.0.0.1:80:80` solo desde tu PC.
+- **Arranque:** Docker arranca al iniciar sesión en Windows (en [Windows Server](#windows-server), al encender).
 - **Verificación:** al final prueba que todo funcione de punta a punta.
+
+Windows pide **permiso de administrador una sola vez**, para crear el grupo `docker-users`, la tarea de arranque y el servicio que abre los puertos publicados. Si dices que no, Docker funciona igual, pero solo desde tu PC y sin arranque automático.
 
 ### ¿Ya tienes algo instalado?
 
@@ -51,6 +79,7 @@ Ejecuta el instalador de todas formas. Se puede ejecutar varias veces sin proble
 ## Requisitos
 
 - Windows 10 2004+ o Windows 11, x64. **Funciona en Windows Home.**
+- O Windows Server 2022 / 2025, con o sin escritorio (funciona en Server Core). Ver [Windows Server](#windows-server).
 - Virtualización activada en la BIOS/UEFI. Viene activada en la mayoría de las PCs.
 - Internet durante la instalación.
 
@@ -70,20 +99,60 @@ Ejecuta el instalador de todas formas. Se puede ejecutar varias veces sin proble
 Docker Desktop hace lo mismo por dentro: una máquina Linux en WSL corre `dockerd`, y un proceso de Windows conecta el pipe con ella. Este proyecto reemplaza esa aplicación gráfica por:
 
 - **`wsl/setup.sh`:** configura la distribución. Activa systemd, instala Docker Engine y socat, configura las actualizaciones de seguridad automáticas y mapea las unidades de Windows para compose.
-- **`relay/docker-pipe-relay.cs`:** un relay de ~250 líneas que se compila en tu PC con el compilador de C# que ya trae Windows. No se descargan binarios precompilados de este repo.
+- **`relay/docker-pipe-relay.cs`:** un relay de ~300 líneas que se compila en tu PC con el compilador de C# que ya trae Windows. No se descargan binarios precompilados de este repo.
+- **`ports/docker-port-sync.cs`:** un servicio pequeño que vigila tus contenedores y abre o cierra el firewall para sus puertos publicados, para que se comporten como en Linux. También se compila en tu PC.
 - **`install.ps1` / `uninstall.ps1`:** la parte de Windows.
 
 ## Uso diario
 
 | | |
 |---|---|
-| Encender | Automático al iniciar sesión. Cualquier comando `docker` también lo despierta. |
+| Encender | Automático al iniciar sesión (al encender en Windows Server). Cualquier comando `docker` también lo despierta. |
 | Apagar (libera RAM) | `wsl --terminate docker` |
 | Actualizar | Ejecuta el instalador otra vez. Además, Docker Engine en WSL recibe actualizaciones de seguridad automáticas. |
 | Terminal dentro del motor | `wsl -d docker` |
 | Desinstalar | Ver [Desinstalación](#desinstalación) |
 
-Los contenedores con `restart: unless-stopped` o `restart: always` vuelven a arrancar solos cuando Docker inicia al iniciar sesión.
+Los contenedores con `restart: unless-stopped` o `restart: always` vuelven a arrancar solos cuando Docker inicia.
+
+## Puertos publicados
+
+Los puertos siguen exactamente lo que dice tu `docker-compose.yml` o `docker run -p`, como en un servidor Linux. No hay nada nuevo que aprender:
+
+| Escribes | Se alcanza desde |
+|---|---|
+| `80:80` | Tu PC **y tu red** (TCP) |
+| `127.0.0.1:80:80` | **Solo tu PC** |
+| `192.168.1.20:80:80` | Solo esa IP de red |
+| `53:53/udp` | Tu PC y tu red (UDP) |
+
+Cuando un contenedor arranca, sus puertos se abren en el firewall de Windows; cuando se detiene o se borra, se vuelven a cerrar. Solo los puertos que publicaste, nada más.
+
+> **Consejo:** las bases de datos y paneles de administración (Postgres, Redis, ...) normalmente no necesitan estar en tu red. Publícalos como `127.0.0.1:5432:5432`.
+
+**Cómo se hace.** El instalador activa el *modo de red mirrored* de WSL (Windows 11 22H2+ / Server 2025), que hace que los puertos se comporten exactamente como en Linux. Luego comprueba que WSL siga teniendo internet. En algunas PCs (ciertas VPN o drivers de red) no lo tiene; en ese caso regresa tu configuración anterior y usa *reenvío de puertos*. Todo es automático.
+
+| | Mirrored (preferido) | Reenvío de puertos (alternativa) |
+|---|---|---|
+| `80:80`, `127.0.0.1:80:80` | ✅ | ✅ |
+| IP específica (`192.168.1.20:80:80`) | ✅ | ⚠️ No se alcanza desde la red; usa `80:80` |
+| UDP | ✅ | ✅ |
+
+Tu `.wslconfig` original se respalda y se restaura al desinstalar.
+
+## Windows Server
+
+Mismo instalador, mismos comandos. Detecta Windows Server solo, y la única diferencia es: **Docker arranca al encender, sin que nadie inicie sesión** (como el servicio de Docker en Linux). Los contenedores con `restart: always` / `unless-stopped` vuelven después de reiniciar.
+
+```powershell
+irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex
+```
+
+- Funciona en **Server Core** (sin escritorio): todo se hace desde PowerShell.
+- **Máquinas virtuales:** activa la virtualización anidada en el host (Hyper-V: `Set-VMProcessor -VMName <vm> -ExposeVirtualizationExtensions $true`).
+- **Server 2022** no tiene modo mirrored, así que usa reenvío de puertos (ver la tabla de arriba). Server 2025 usa mirrored.
+- ¿Quieres que arranque al encender en una PC normal? `.\install.ps1 -Server`.
+- Otros usuarios que deban usar `docker`: agrégalos al grupo `docker-users` (`Add-LocalGroupMember docker-users <usuario>`), igual que con Docker Desktop.
 
 ## Desinstalación
 
@@ -101,7 +170,7 @@ Desde PowerShell también lo puedes ejecutar directamente:
 & "$env:LOCALAPPDATA\Programs\wsl-docker-engine\installer\uninstall.ps1" -RemoveDistro
 ```
 
-Lo que se quita de Windows: `docker.exe`, los plugins de compose y buildx que instaló, el relay, el arrancador y los cambios al PATH y a las variables de entorno. Los plugins que hayas instalado tú no se tocan.
+Lo que se quita de Windows: `docker.exe`, los plugins de compose y buildx que instaló, el relay, la tarea de arranque, el servicio de puertos con todas las reglas de firewall y reenvío que creó, el grupo `docker-users` (solo si lo creó él) y los cambios al PATH y a las variables de entorno; además restaura tu `.wslconfig` original. Los plugins que hayas instalado tú no se tocan. Windows pide permiso de administrador una vez.
 
 **Antes de borrar la distribución:**
 
@@ -114,13 +183,14 @@ Lo que se quita de Windows: `docker.exe`, los plugins de compose y buildx que in
 
 - **Los bind mounts de compose funcionan** (`./data:/data`, `../volume:/var/lib/...`). El instalador configura `COMPOSE_CONVERT_WINDOWS_PATHS=1`, así compose convierte `C:\...` en `/c/...`, y `/c` apunta a tu disco C dentro de WSL.
 - **Con `docker run -v`**, escribe las rutas de Windows como `/c/Users/tu-usuario/proyecto:/app` en vez de `C:\Users\...`.
-- **Los puertos publicados solo son accesibles desde tu PC** (`localhost:5432`, etc.). Es más seguro que Docker Desktop, que los publica en todas las interfaces. Para exponer un puerto a tu red local, usa un port proxy de WSL o el [modo de red mirrored](https://learn.microsoft.com/windows/wsl/networking).
 - **Rendimiento:** los **volúmenes con nombre** viven dentro de WSL y son rápidos. Montar carpetas de Windows funciona, pero el disco es más lento, igual que en Docker Desktop. Para bases de datos, mejor usa volúmenes con nombre.
 - **Permisos en discos de Windows:** se activa la opción `metadata` de WSL, así las imágenes que necesitan dueño y permisos de Linux (como Postgres) funcionan con carpetas de Windows montadas.
 
 ## Seguridad
 
-- **El pipe es solo para ti:** solo tu usuario de Windows puede conectarse, y se rechazan las conexiones remotas (`PIPE_REJECT_REMOTE_CLIENTS` más una regla explícita que niega a NETWORK).
+- **Quién puede usar Docker:** solo tu usuario de Windows y los miembros del grupo local `docker-users` (como en Docker Desktop). Se rechazan las conexiones remotas (`PIPE_REJECT_REMOTE_CLIENTS` más una regla explícita que niega a NETWORK).
+- **Solo se abren los puertos que publicas,** y se cierran cuando el contenedor se detiene. Los puertos en `127.0.0.1` nunca se abren.
+- **El servicio de puertos corre como SYSTEM** (necesita cambiar el firewall). Se compila en `Program Files`, donde un usuario normal no puede reemplazarlo, y solo lee de Docker.
 - **Sin impostores:** si otro programa ya tiene `\\.\pipe\docker_engine`, el relay se niega a arrancar en vez de compartirlo.
 - **Sin puerto TCP:** Docker nunca queda expuesto en un puerto TCP abierto (nada de `tcp://...:2375`).
 - **Descargas verificadas:** compose y buildx se comparan con los checksums de su release. Docker Engine viene del repositorio apt oficial de Docker, y el CLI de `download.docker.com` por HTTPS.
@@ -136,6 +206,9 @@ Nota: quien puede usar `docker` tiene, en la práctica, acceso root dentro de la
 | `failed to connect to the docker API at npipe:////./pipe/docker_engine` | Ejecuta `%LOCALAPPDATA%\Programs\wsl-docker-engine\bin\docker-pipe-relay.exe`, o cierra sesión y vuelve a entrar. Revisa `docker-pipe-relay.log` en esa carpeta. |
 | La instalación falla con `0x80370102` | Activa la virtualización (Intel VT-x / AMD-V) en la BIOS/UEFI. |
 | Docker no arranca dentro de WSL | `wsl -d docker -u root -- systemctl status docker` |
+| Un puerto publicado no se alcanza desde la red | Revisa `C:\ProgramData\wsl-docker-engine\port-sync.log`. Si no aceptaste el permiso de administrador, ejecuta el instalador otra vez y acéptalo. |
+| WSL se quedó sin internet después de instalar | Ejecuta el instalador con `-NetworkMode portproxy` (algunas VPN no funcionan con mirrored). |
+| Quiero los puertos solo en mi PC | `.\install.ps1 -NetworkMode local` |
 | Quiero otro nombre de distribución | `.\install.ps1 -Distro midocker` |
 | No quiero que arranque solo | `.\install.ps1 -NoStartup` |
 

@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Installs Docker Engine on WSL 2 and the official Docker CLI on Windows,
+  lindowin: headless Linux Docker for Windows. Installs Docker Engine on WSL 2
+  and the official Docker CLI on Windows,
   with no Docker Desktop and no GUI.
 
 .DESCRIPTION
@@ -9,15 +10,19 @@
     (official downloads, checksums verified).
   - Exposes Docker on \\.\pipe\docker_engine, like Docker Desktop, so "docker"
     works from cmd/PowerShell with no DOCKER_HOST and no open TCP port.
-  - Starts everything automatically when you sign in to Windows.
+  - Published ports behave like on Linux: "80:80" is reachable from the network,
+    "127.0.0.1:80:80" only from this PC, TCP and UDP.
+  - Starts automatically: at sign-in on PCs, at boot (no sign-in needed) on
+    Windows Server.
 
   Safe to run again: it skips what is already installed and updates the rest.
+  Asks for administrator permission once (firewall rules, start task).
 
 .EXAMPLE
-  irm https://raw.githubusercontent.com/alozdev/wsl-docker-engine/main/install.ps1 | iex
+  irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex
 
 .EXAMPLE
-  .\install.ps1 -Distro docker -NoStartup
+  .\install.ps1 -Server
 #>
 [CmdletBinding()]
 param(
@@ -25,7 +30,13 @@ param(
     [string]$Distro = "docker",
     # Where the Windows files are installed
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\wsl-docker-engine"),
-    # Do not start Docker automatically at sign-in
+    # Start Docker at boot without anyone signing in (automatic on Windows Server)
+    [switch]$Server,
+    # How published ports reach the network. "auto": mirrored if it works, otherwise portproxy.
+    # "local": only this PC (no admin rules for ports).
+    [ValidateSet("auto", "mirrored", "portproxy", "local")]
+    [string]$NetworkMode = "auto",
+    # Do not start Docker automatically
     [switch]$NoStartup,
     # Continue even if Docker Desktop or another Docker pipe is detected
     [switch]$Force
@@ -36,7 +47,7 @@ $ProgressPreference = "SilentlyContinue"   # makes Invoke-WebRequest much faster
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $env:WSL_UTF8 = "1"                       # wsl.exe prints UTF-8 instead of UTF-16
 
-$Repo = "alozdev/wsl-docker-engine"
+$Repo = "alozdev/lindowin"
 $UbuntuImage = "Ubuntu-24.04"
 
 function Write-Step($msg) { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -87,6 +98,150 @@ function Start-TempKeepAlive($name) {
     # WSL shuts an idle distro down after a few seconds, killing running containers.
     # Keep it alive while the installer works (the process ends by itself).
     Start-Process wsl.exe -ArgumentList "-d $name -u root -- sleep 900" -WindowStyle Hidden
+}
+
+function Wait-DockerActive($name) {
+    for ($i = 0; $i -lt 30; $i++) {
+        if ((Invoke-Wsl @("-d", $name, "-u", "root", "--", "systemctl", "is-active", "docker")).Text -eq "active") { return }
+        Start-Sleep 2
+    }
+    Stop-Install "Docker did not start inside WSL. Check with: wsl -d $name -u root -- systemctl status docker"
+}
+
+function Stop-DockerGracefully($name) {
+    # Running containers get SIGTERM and can shut down properly (databases!)
+    Invoke-Wsl @("-d", $name, "-u", "root", "--", "sh", "-c", "systemctl stop docker.service docker.socket >/dev/null 2>&1 || true") | Out-Null
+}
+
+function Restart-Wsl($name) {
+    # .wslconfig changes need a full WSL restart (all distros)
+    Stop-DockerGracefully $name
+    Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
+    Invoke-Wsl @("--shutdown") | Out-Null
+    Start-Sleep 2
+    Start-TempKeepAlive $name
+    Wait-DockerActive $name
+}
+
+function Test-WslInternet($name) {
+    for ($i = 0; $i -lt 3; $i++) {
+        $r = Invoke-Wsl @("-d", $name, "-u", "root", "--", "curl", "-fsS", "-m", "10", "-o", "/dev/null", "https://download.docker.com/")
+        if ($r.Code -eq 0) { return $true }
+        Start-Sleep 3
+    }
+    return $false
+}
+
+function Get-WslNetworkingMode {
+    $f = Join-Path $env:USERPROFILE ".wslconfig"
+    if (-not (Test-Path $f)) { return "nat" }
+    $section = ""
+    foreach ($line in Get-Content $f) {
+        if ($line -match "^\s*\[(.+)\]\s*$") { $section = $Matches[1].Trim().ToLower(); continue }
+        if ($section -eq "wsl2" -and $line -match "^\s*networkingMode\s*=\s*(\w+)") { return $Matches[1].ToLower() }
+    }
+    return "nat"
+}
+
+function Set-WslConfigValue($sectionName, $key, $value) {
+    # Sets [section] key=value in .wslconfig, keeping the user's other settings.
+    # Returns $true if the file changed.
+    $f = Join-Path $env:USERPROFILE ".wslconfig"
+    $lines = if (Test-Path $f) { @(Get-Content $f) } else { @() }
+    $out = New-Object System.Collections.Generic.List[string]
+    $section = ""; $seen = $false; $done = $false
+    foreach ($line in $lines) {
+        if ($line -match "^\s*\[(.+)\]\s*$") {
+            if ($section -eq $sectionName -and -not $done) { $out.Add("$key=$value"); $done = $true }
+            $section = $Matches[1].Trim().ToLower()
+            if ($section -eq $sectionName) { $seen = $true }
+            $out.Add($line); continue
+        }
+        if ($section -eq $sectionName -and $line -match "^\s*$key\s*=") {
+            if (-not $done) { $out.Add("$key=$value"); $done = $true }
+            continue
+        }
+        $out.Add($line)
+    }
+    if (-not $done) {
+        if (-not $seen) { if ($out.Count -gt 0) { $out.Add("") }; $out.Add("[$sectionName]") }
+        $out.Add("$key=$value")
+    }
+    if (($lines -join "`n") -eq ($out -join "`n")) { return $false }
+    [IO.File]::WriteAllLines($f, $out)
+    return $true
+}
+
+function Set-WslNetworkingMode($value) { Set-WslConfigValue "wsl2" "networkingMode" $value | Out-Null }
+
+function Select-NetworkMode($name, $requested, $config) {
+    # Returns "mirrored", "portproxy" or "local"
+    if ($requested -eq "local") { return "local" }
+    $current = Get-WslNetworkingMode
+    $supported = [Environment]::OSVersion.Version.Build -ge 22621   # Windows 11 22H2+ / Server 2025
+    $wslconfig = Join-Path $env:USERPROFILE ".wslconfig"
+    $backup = Join-Path $InstallDir "wslconfig.original"
+    $noFile = Join-Path $InstallDir "wslconfig.original.none"
+
+    if ($requested -eq "portproxy" -or -not $supported -or ($requested -eq "auto" -and $config.mirroredFailed)) {
+        if ($requested -eq "mirrored") { Write-Warn "Mirrored networking needs Windows 11 22H2+ or Windows Server 2025. Using portproxy." }
+        if ($current -eq "mirrored") {
+            if ((Test-Path $backup) -or (Test-Path $noFile)) {
+                # We turned mirrored on before: put the user's original file back
+                if (Test-Path $noFile) { Remove-Item $wslconfig -Force; Remove-Item $noFile -Force } else { Move-Item $backup $wslconfig -Force }
+                Write-Info "Restarting WSL to switch back to its default network (other WSL distros restart too)..."
+                Restart-Wsl $name
+            } else {
+                Write-Info "Your .wslconfig already uses mirrored networking: keeping it."
+                return "mirrored"
+            }
+        }
+        return "portproxy"
+    }
+
+    if (-not (Test-Path $backup) -and -not (Test-Path $noFile)) {
+        if (Test-Path $wslconfig) { Copy-Item $wslconfig $backup } else { New-Item -ItemType File $noFile | Out-Null }
+    }
+    $changed = Set-WslConfigValue "wsl2" "networkingMode" "mirrored"
+    # Lets this PC reach published ports through its own network IP too (like on Linux)
+    if (Set-WslConfigValue "experimental" "hostAddressLoopback" "true") { $changed = $true }
+    if ($changed) {
+        Write-Info "Enabling WSL mirrored networking (other WSL distros restart too)..."
+        Restart-Wsl $name
+    }
+    if (Test-WslInternet $name) { return "mirrored" }
+
+    # Mirrored breaks networking on some PCs (VPNs, some network drivers): go back
+    Write-Warn "WSL had no internet with mirrored networking (common with some VPNs). Switching to portproxy."
+    if (Test-Path $noFile) { Remove-Item $wslconfig -Force -ErrorAction SilentlyContinue; Remove-Item $noFile -Force }
+    elseif (Test-Path $backup) { Move-Item $backup $wslconfig -Force }
+    else { Set-WslNetworkingMode "nat" }
+    Restart-Wsl $name
+    $config.mirroredFailed = $true
+    return "portproxy"
+}
+
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Invoke-SystemSetup([string[]]$Arguments) {
+    # Runs system-setup.ps1 as administrator (one Windows permission prompt)
+    $script = Join-Path $InstallDir "installer\system-setup.ps1"
+    $result = Join-Path $script:TempDir "system-setup.result"
+    $all = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$script`"") + $Arguments + @("-ResultFile", "`"$result`"")
+    try {
+        if (Test-IsAdmin) {
+            Start-Process powershell.exe -ArgumentList $all -WindowStyle Hidden -Wait
+        } else {
+            Start-Process powershell.exe -ArgumentList $all -Verb RunAs -WindowStyle Hidden -Wait
+        }
+    } catch {
+        return "DECLINED"
+    }
+    if (Test-Path $result) { return (Get-Content $result -Raw).Trim() }
+    return "ERROR: no result"
 }
 
 function Get-WslVersion {
@@ -165,8 +320,8 @@ function Add-UserPath($dir) {
 # ------------------------------------------------------------------------------
 
 Write-Host ""
-Write-Host "wsl-docker-engine installer" -ForegroundColor White
-Write-Host "Docker Engine on WSL 2 + Docker CLI for Windows, without Docker Desktop"
+Write-Host "lindowin installer" -ForegroundColor White
+Write-Host "Headless Linux Docker for Windows. Terminal only, no Docker Desktop."
 
 $script:TempDir = Join-Path ([IO.Path]::GetTempPath()) ("wsl-docker-engine-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -ItemType Directory -Force $script:TempDir | Out-Null
@@ -217,7 +372,7 @@ try {
     if ((Resolve-Path $src).Path.TrimEnd("\") -ne $installerCopy.TrimEnd("\")) {
         if (Test-Path $installerCopy) { Remove-Item -Recurse -Force $installerCopy }
         New-Item -ItemType Directory -Force $installerCopy | Out-Null
-        foreach ($item in "install.ps1", "install.cmd", "uninstall.ps1", "uninstall.cmd", "wsl", "relay", "LICENSE") {
+        foreach ($item in "install.ps1", "install.cmd", "uninstall.ps1", "uninstall.cmd", "system-setup.ps1", "wsl", "relay", "ports", "LICENSE") {
             $p = Join-Path $src $item
             if (Test-Path $p) { Copy-Item $p $installerCopy -Recurse -Force }
         }
@@ -298,12 +453,7 @@ try {
     } else {
         Invoke-Wsl @("-d", $Distro, "-u", "root", "--", "systemctl", "start", "docker") | Out-Null
     }
-    $active = $false
-    for ($i = 0; $i -lt 30 -and -not $active; $i++) {
-        $active = (Invoke-Wsl @("-d", $Distro, "-u", "root", "--", "systemctl", "is-active", "docker")).Text -eq "active"
-        if (-not $active) { Start-Sleep 2 }
-    }
-    if (-not $active) { Stop-Install "Docker did not start inside WSL. Check with: wsl -d $Distro -u root -- systemctl status docker" }
+    Wait-DockerActive $Distro
     Write-Ok "Docker Engine is running inside WSL"
 
     # ---- Docker CLI for Windows ----------------------------------------------------
@@ -363,46 +513,91 @@ try {
         Write-Warn "Remove it from PATH (or uninstall it) so 'docker' uses this setup."
     }
 
-    # ---- Start at sign-in ----------------------------------------------------------
-    $startupDir = [Environment]::GetFolderPath("Startup")
-    $launcher = Join-Path $startupDir "wsl-docker-engine.vbs"
-    if ($NoStartup) {
-        if (Test-Path $launcher) { Remove-Item $launcher -Force }
-        Write-Info "Not starting at sign-in (-NoStartup)."
-    } else {
-        # VBScript line:  CreateObject("WScript.Shell").Run """<relay.exe>"" --distro <name>", 0, False
-        $vbs = @(
-            "' wsl-docker-engine: starts Docker (WSL distro '$Distro') and the pipe relay at sign-in"
-            "CreateObject(""WScript.Shell"").Run """"""$relayExe"""" --distro $Distro"", 0, False"
-        ) -join "`r`n"
-        [IO.File]::WriteAllText($launcher, $vbs, [Text.Encoding]::ASCII)
-        Write-Ok "Starts automatically at sign-in"
+    # ---- Previous settings ----------------------------------------------------------
+    $configPath = Join-Path $InstallDir "config.json"
+    $config = @{ mirroredFailed = $false }
+    if (Test-Path $configPath) {
+        try {
+            $old = Get-Content $configPath -Raw | ConvertFrom-Json
+            if ($old.mirroredFailed) { $config.mirroredFailed = $true }
+        } catch { }
     }
+
+    # ---- Network -------------------------------------------------------------------
+    Write-Step "Configuring how published ports reach the network"
+    $mode = Select-NetworkMode $Distro $NetworkMode $config
+    switch ($mode) {
+        "mirrored"  { Write-Ok "Mirrored networking: ports work exactly like on Linux (TCP/UDP, any IP)" }
+        "portproxy" { Write-Ok "Port forwarding: '80:80' is reachable from the network, '127.0.0.1:80:80' only from this PC" }
+        "local"     { Write-Ok "Local only: published ports are reachable from this PC only (-NetworkMode local)" }
+    }
+
+    # ---- Administrator part (one permission prompt) ---------------------------------
+    $isServer = $Server -or ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1)
+    Write-Step "Setting up automatic start and port rules"
+    if ($isServer) { Write-Info "Windows Server (or -Server): Docker will start at boot, even if nobody signs in." }
+    Write-Info "Windows will ask for administrator permission once."
+    Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
+    $setupArgs = @("-Action", "Install", "-InstallDir", "`"$InstallDir`"", "-Distro", $Distro,
+                   "-UserName", "`"$([Security.Principal.WindowsIdentity]::GetCurrent().Name)`"", "-Mode", $mode)
+    if ($isServer) { $setupArgs += "-StartAtBoot" }
+    $result = Invoke-SystemSetup $setupArgs
+    $relayArgs = @("--distro", $Distro, "--wsl-ip-file", "`"$(Join-Path $bin 'wsl-ip.txt')`"")
+    if ($result -eq "OK") {
+        Write-Ok "docker-users group, port rules service and start task are ready"
+        if ($NoStartup) {
+            Disable-ScheduledTask -TaskName "wsl-docker-engine" -ErrorAction SilentlyContinue | Out-Null
+            Write-Info "Automatic start disabled (-NoStartup)."
+        } else {
+            Write-Ok ($(if ($isServer) { "Starts automatically at boot" } else { "Starts automatically at sign-in" }))
+        }
+    } else {
+        if ($result -eq "DECLINED") { Write-Warn "Administrator permission was not granted." } else { Write-Warn $result }
+        Write-Warn "Docker works, but only from this PC, and it will not start by itself."
+        Write-Warn "Run the installer again and accept the prompt to finish the setup."
+        $mode = "local"
+    }
+
+    # Old versions started from a .vbs in the Startup folder: the task replaces it
+    $legacy = Join-Path ([Environment]::GetFolderPath("Startup")) "wsl-docker-engine.vbs"
+    if (Test-Path $legacy) { Remove-Item $legacy -Force }
 
     # Remember what was installed (the uninstaller only removes plugins with these hashes)
     $hashes = @("docker-compose.exe", "docker-buildx.exe") | ForEach-Object { Get-Sha256 (Join-Path $plugins $_) }
-    Set-Content -Path (Join-Path $InstallDir "config.json") -Encoding ASCII -Value (@{ distro = $Distro; pluginHashes = $hashes } | ConvertTo-Json)
+    Set-Content -Path $configPath -Encoding ASCII -Value (@{
+        distro = $Distro; pluginHashes = $hashes; networkMode = $mode; server = [bool]$isServer
+        mirroredFailed = [bool]$config.mirroredFailed
+    } | ConvertTo-Json)
 
     # ---- Start and test ------------------------------------------------------------
     Write-Step "Starting and testing"
-    Start-Process $relayExe -ArgumentList "--distro", $Distro -WindowStyle Hidden
+    $started = $false
+    if ($result -eq "OK" -and -not $NoStartup) {
+        try { Start-ScheduledTask -TaskName "wsl-docker-engine" -ErrorAction Stop; $started = $true } catch { }
+    }
+    if (-not $started) { Start-Process $relayExe -ArgumentList $relayArgs -WindowStyle Hidden }
     for ($i = 0; $i -lt 20 -and -not (Test-Path "\\.\pipe\docker_engine"); $i++) { Start-Sleep -Milliseconds 500 }
 
     Remove-Item Env:DOCKER_HOST -ErrorAction SilentlyContinue
     $r = Invoke-Native $dockerExe @("version", "--format", "{{.Server.Version}}")
-    $server = $r.Text
-    if ($r.Code -ne 0 -or -not $server) {
+    $engineVersion = $r.Text
+    if ($r.Code -ne 0 -or -not $engineVersion) {
         $log = Join-Path $bin "docker-pipe-relay.log"
         if (Test-Path $log) { Get-Content $log -Tail 5 | ForEach-Object { Write-Host "    $_" } }
         Stop-Install "Docker is installed but the Windows CLI could not reach it."
     }
-    Write-Ok "docker.exe $cliVersion  ->  Docker Engine $server"
+    Write-Ok "docker.exe $cliVersion  ->  Docker Engine $engineVersion"
 
     Write-Host ""
     Write-Host "Done! Open a NEW terminal and try:" -ForegroundColor Green
-    Write-Host "    docker run --rm hello-world"
+    Write-Host "    docker run -d -p 8080:80 nginx   (then open http://localhost:8080)"
     Write-Host "    docker compose up -d"
     Write-Host ""
+    switch ($mode) {
+        "local"     { Write-Host "Published ports:  only reachable from this PC" }
+        "portproxy" { Write-Host "Published ports:  like on Linux ('80:80' = network, '127.0.0.1:80:80' = this PC only)" }
+        "mirrored"  { Write-Host "Published ports:  exactly like on Linux" }
+    }
     Write-Host "Stop Docker:      wsl --terminate $Distro"
     Write-Host "Uninstall:        $installerCopy\uninstall.cmd"
 }

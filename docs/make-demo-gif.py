@@ -1,13 +1,18 @@
-"""Renders docs/demo.gif: a terminal where `docker` is missing, the one-line
-installer runs (sped up), and `docker` works afterwards.
+"""Renders the README images:
 
-The text is the installer's real output. Version numbers are fetched from the
-same official sources the installer uses, so the GIF stays current. It is
-regenerated automatically by .github/workflows/demo-gif.yml.
+  docs/demo.gif            `docker` is missing -> one-line install (sped up) ->
+                           `docker run nginx` -> "Welcome to nginx!"
+  docs/compare.gif         Windows Server: native Docker fails with nginx,
+                           lindowin runs it
+  docs/social-preview.png  1280x640 image for the GitHub "Social preview" setting
+
+The installer text is its real output (trimmed). Version numbers are fetched
+from the same official sources the installer uses, so the images stay current.
+Regenerated automatically by .github/workflows/demo-gif.yml.
 
 Usage:
     pip install pillow
-    python docs/make-demo-gif.py [--out docs/demo.gif] [--fonts DIR]
+    python docs/make-demo-gif.py [--out-dir docs] [--fonts DIR]
 
 --fonts: folder with CascadiaMono-Regular.ttf / CascadiaMono-SemiBold.ttf.
 If omitted, Cascadia Mono (SIL OFL) is downloaded from Microsoft's GitHub.
@@ -28,12 +33,14 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASCADIA_ZIP = "https://github.com/microsoft/cascadia-code/releases/download/v2407.24/CascadiaCode-2407.24.zip"
+INSTALL_CMD = "irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex"
+UA = {"User-Agent": "lindowin-demo"}
 
 
 # ---- Versions (same sources as install.ps1) --------------------------------------
 
 def http_get(url, headers=None, attempts=4):
-    req = urllib.request.Request(url, headers={"User-Agent": "wsl-docker-engine-demo", **(headers or {})})
+    req = urllib.request.Request(url, headers={**UA, **(headers or {})})
     for i in range(1, attempts + 1):
         try:
             with urllib.request.urlopen(req, timeout=120) as r:
@@ -48,8 +55,7 @@ def http_get(url, headers=None, attempts=4):
 
 def latest_tag(repo):
     # github.com/<repo>/releases/latest redirects to .../tag/<tag>
-    req = urllib.request.Request(f"https://github.com/{repo}/releases/latest",
-                                 headers={"User-Agent": "wsl-docker-engine-demo"})
+    req = urllib.request.Request(f"https://github.com/{repo}/releases/latest", headers=UA)
     with urllib.request.urlopen(req, timeout=60) as r:
         m = re.search(r"/tag/([^/?#]+)$", r.geturl())
     if not m:
@@ -73,23 +79,19 @@ def get_versions():
     listing = http_get("https://download.docker.com/win/static/stable/x86_64/").decode()
     found = re.findall(r'href="docker-(\d+\.\d+\.\d+)\.zip"', listing)
     docker = max(found, key=lambda v: tuple(int(x) for x in v.split(".")))
-    with open(os.path.join(ROOT, "install.ps1"), encoding="utf-8") as f:
-        ubuntu = re.search(r'\$UbuntuImage\s*=\s*"([^"]+)"', f.read()).group(1)
     return {
         "docker": docker,
         "docker_cli_build": short_sha("docker/cli", f"v{docker}"),
-        "docker_engine_build": short_sha("moby/moby", f"docker-v{docker}"),
         "compose": latest_tag("docker/compose"),
         "buildx": latest_tag("docker/buildx"),
         "wsl": latest_tag("microsoft/WSL").lstrip("v"),
-        "ubuntu": ubuntu,
     }
 
 
 def get_fonts_dir(arg):
     if arg:
         return arg
-    tmp = os.path.join(tempfile.gettempdir(), "wsl-docker-engine-fonts")
+    tmp = os.path.join(tempfile.gettempdir(), "lindowin-fonts")
     if not os.path.exists(os.path.join(tmp, "CascadiaMono-Regular.ttf")):
         os.makedirs(tmp, exist_ok=True)
         with zipfile.ZipFile(io.BytesIO(http_get(CASCADIA_ZIP))) as z:
@@ -101,17 +103,14 @@ def get_fonts_dir(arg):
     return tmp
 
 
-# ---- Rendering --------------------------------------------------------------------
+# ---- Theme ------------------------------------------------------------------------
 
 S = 2                 # draw at 2x, then downscale (smooth text and corners)
-W, H = 920, 280       # final size
 RADIUS = 12
 BAR_H = 36
 PAD_X, PAD_TOP = 16, 10
 LH = 19
-ROWS = (H - BAR_H - PAD_TOP - 6) // LH
 
-# Modern dark theme
 BG = (24, 24, 27)
 BAR = (40, 40, 44)
 BORDER = (64, 64, 70)
@@ -125,66 +124,84 @@ CYAN = (86, 182, 194)
 BADGE_BG = (60, 52, 30)
 ICON_BG = (1, 36, 86)
 ICON_FG = (220, 230, 255)
-PROMPT = "PS C:\\Users\\dev> "
+
+
+class Fonts:
+    def __init__(self, fonts_dir):
+        mono = lambda n, size=14: ImageFont.truetype(os.path.join(fonts_dir, n), size * S)
+        self.mono = mono("CascadiaMono-Regular.ttf")
+        self.mono_b = mono("CascadiaMono-SemiBold.ttf")
+        self.dir = fonts_dir
+        self.ui = self.ui_font(12, bold=False)
+        self.ui_b = self.ui_font(12, bold=True)
+
+    def ui_font(self, size, bold):
+        # Segoe UI on Windows (the workflow runs on windows-latest); Cascadia otherwise
+        path = r"C:\Windows\Fonts\seguisb.ttf" if bold else r"C:\Windows\Fonts\segoeui.ttf"
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size * S)
+        name = "CascadiaMono-SemiBold.ttf" if bold else "CascadiaMono-Regular.ttf"
+        return ImageFont.truetype(os.path.join(self.dir, name), size * S)
 
 
 class Terminal:
-    def __init__(self, fonts_dir):
-        mono = lambda n: ImageFont.truetype(os.path.join(fonts_dir, n), 14 * S)
-        self.mono = mono("CascadiaMono-Regular.ttf")
-        self.mono_b = mono("CascadiaMono-SemiBold.ttf")
-        ui, ui_b = r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\seguisb.ttf"
-        self.ui = ImageFont.truetype(ui, 12 * S) if os.path.exists(ui) else mono("CascadiaMono-Regular.ttf")
-        self.ui_b = ImageFont.truetype(ui_b, 12 * S) if os.path.exists(ui_b) else self.mono_b
-        self.lines = []
-        self.frames = []
-        self.badge = None
-        big = Image.new("L", (W * S, H * S), 0)
-        ImageDraw.Draw(big).rounded_rectangle([0, 0, W * S - 1, H * S - 1], radius=RADIUS * S, fill=255)
-        self.mask = big.resize((W, H), Image.LANCZOS).point(lambda v: 255 if v >= 128 else 0)
+    """One terminal window. Draw with render(); text helpers record frames via the Recorder."""
 
-    def render(self, cursor=True):
-        w, h = W * S, H * S
+    def __init__(self, fonts, w, h, title, prompt):
+        self.f, self.w, self.h, self.title, self.prompt = fonts, w, h, title, prompt
+        self.rows = (h - BAR_H - PAD_TOP - 6) // LH
+        self.lines = []
+        self.badge = None
+        self.cursor = True
+        self.rec = None
+
+    def mask(self):
+        big = Image.new("L", (self.w * S, self.h * S), 0)
+        ImageDraw.Draw(big).rounded_rectangle([0, 0, self.w * S - 1, self.h * S - 1], radius=RADIUS * S, fill=255)
+        return big.resize((self.w, self.h), Image.LANCZOS).point(lambda v: 255 if v >= 128 else 0)
+
+    def render(self):
+        f, w, h = self.f, self.w * S, self.h * S
         img = Image.new("RGB", (w, h), BG)
         d = ImageDraw.Draw(img)
 
         # Title bar with a Windows Terminal style tab
+        tab_w = 66 + d.textlength(self.title, font=f.ui) / S
         d.rectangle([0, 0, w, BAR_H * S], fill=BAR)
-        d.rounded_rectangle([8 * S, 7 * S, 200 * S, (BAR_H + RADIUS) * S], radius=8 * S, fill=BG)
+        d.rounded_rectangle([8 * S, 7 * S, (8 + tab_w) * S, (BAR_H + RADIUS) * S], radius=8 * S, fill=BG)
         d.rounded_rectangle([20 * S, 15 * S, 36 * S, 30 * S], radius=3 * S, fill=ICON_BG)
-        d.text((22 * S, 14 * S), ">_", font=self.ui_b, fill=ICON_FG)
-        d.text((46 * S, 13 * S), "Windows PowerShell", font=self.ui, fill=WHITE)
-        d.text((180 * S, 12 * S), "\u00d7", font=self.ui, fill=DIM)
-        d.text((214 * S, 11 * S), "+", font=self.ui, fill=DIM)
-        cx, cy = 243 * S, 20 * S
-        d.line([(cx - 4 * S, cy - 2 * S), (cx, cy + 2 * S), (cx + 4 * S, cy - 2 * S)], fill=DIM, width=S + 1)
-        for x, glyph in ((W - 112, "\u2013"), (W - 70, "\u25a1"), (W - 30, "\u00d7")):
-            d.text((x * S, 10 * S), glyph, font=self.ui, fill=FG)
+        d.text((22 * S, 14 * S), ">_", font=f.ui_b, fill=ICON_FG)
+        d.text((46 * S, 13 * S), self.title, font=f.ui, fill=WHITE)
+        d.text(((tab_w - 12) * S, 12 * S), "\u00d7", font=f.ui, fill=DIM)
+        for x, glyph in ((self.w - 112, "\u2013"), (self.w - 70, "\u25a1"), (self.w - 30, "\u00d7")):
+            d.text((x * S, 10 * S), glyph, font=f.ui, fill=FG)
         if self.badge:
-            tw = d.textlength(self.badge, font=self.ui) / S
-            x1 = W - 140
+            tw = d.textlength(self.badge, font=f.ui) / S
+            x1 = self.w - 140
             d.rounded_rectangle([(x1 - tw - 22) * S, 9 * S, x1 * S, 28 * S], radius=10 * S, fill=BADGE_BG)
-            d.text(((x1 - tw - 11) * S, 11 * S), self.badge, font=self.ui, fill=YELLOW)
+            d.text(((x1 - tw - 11) * S, 11 * S), self.badge, font=f.ui, fill=YELLOW)
 
         # Terminal text
-        view = self.lines[-ROWS:]
+        view = self.lines[-self.rows:]
         y = (BAR_H + PAD_TOP) * S
         for segs in view:
             x = PAD_X * S
             for text, color, bold in segs:
-                f = self.mono_b if bold else self.mono
-                d.text((x, y), text, font=f, fill=color)
-                x += d.textlength(text, font=f)
+                font = f.mono_b if bold else f.mono
+                d.text((x, y), text, font=font, fill=color)
+                x += d.textlength(text, font=font)
             y += LH * S
-        if cursor and view:
-            x = PAD_X * S + sum(d.textlength(t, font=self.mono_b if b else self.mono) for t, _, b in view[-1])
+        if self.cursor and view:
+            x = PAD_X * S + sum(d.textlength(t, font=f.mono_b if b else f.mono) for t, _, b in view[-1])
             d.rounded_rectangle([x + 2 * S, y - LH * S + 3 * S, x + 9 * S, y - 2 * S], radius=S, fill=FG)
 
         d.rounded_rectangle([0, 0, w - 1, h - 1], radius=RADIUS * S, outline=BORDER, width=S)
-        return img.resize((W, H), Image.LANCZOS)
+        return img.resize((self.w, self.h), Image.LANCZOS)
 
+    # ---- text helpers (each one can record a frame) ----
     def snap(self, ms, cursor=True):
-        self.frames.append((self.render(cursor), ms))
+        self.cursor = cursor
+        self.rec.snap(ms)
 
     def out(self, text="", color=FG, bold=False, ms=0):
         self.lines.append([(text, color, bold)])
@@ -195,22 +212,48 @@ class Terminal:
         self.lines.append([("    OK  ", GREEN, False), (text, FG, False)])
         self.snap(ms, cursor=False)
 
-    def step(self, title, ms=260):
-        self.out("")
+    def step(self, title, ms=160):
         self.out("==> " + title, CYAN, ms=ms)
 
     def type_cmd(self, cmd, before=700, after=350, step=2, speed=45):
-        self.lines.append([(PROMPT, FG, False)])
+        if not self.lines or self.lines[-1] != [(self.prompt, FG, False)]:
+            self.lines.append([(self.prompt, FG, False)])
         self.snap(before)
         for i in range(0, len(cmd), step):
-            self.lines[-1] = [(PROMPT, FG, False), (cmd[: i + step], YELLOW, False)]
+            self.lines[-1] = [(self.prompt, FG, False), (cmd[: i + step], YELLOW, False)]
             self.snap(speed)
-        self.lines[-1] = [(PROMPT, FG, False), (cmd, YELLOW, False)]
+        self.lines[-1] = [(self.prompt, FG, False), (cmd, YELLOW, False)]
         self.snap(after)
+
+    def prompt_line(self):
+        self.lines.append([(self.prompt, FG, False)])
+
+
+class Recorder:
+    """Places one or more terminals on a transparent canvas and records frames."""
+
+    def __init__(self, w, h, panes):
+        self.w, self.h, self.panes, self.frames = w, h, panes, []
+        self.mask = Image.new("L", (w, h), 0)
+        for term, (x, y) in panes:
+            term.rec = self
+            self.mask.paste(term.mask(), (x, y))
+
+    def snap(self, ms):
+        img = Image.new("RGB", (self.w, self.h), BG)
+        for term, (x, y) in self.panes:
+            img.paste(term.render(), (x, y))
+        self.frames.append((img, ms))
+
+    def blink(self, term, times=4, end=2500):
+        for _ in range(times):
+            term.snap(450, cursor=False)
+            term.snap(450, cursor=True)
+        term.snap(end)
 
     def save_gif(self, path):
         # One shared palette (no color flicker): exact theme colors + anti-aliasing
-        # shades, plus one transparent index for the rounded corners.
+        # shades, plus one transparent index for the rounded corners / gaps.
         mix = lambda a, b, t: tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
         colors = []
         add = lambda c: colors.append(c) if c not in colors else None
@@ -240,96 +283,144 @@ class Terminal:
         imgs = []
         for f, _ in self.frames:
             q = f.quantize(palette=pal_img, dither=Image.Dither.NONE)
-            q.paste(transparent, (0, 0, W, H), mask=outside)
+            q.paste(transparent, (0, 0, self.w, self.h), mask=outside)
             imgs.append(q)
         imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=[ms for _, ms in self.frames],
                      loop=0, transparency=transparent, disposal=2, optimize=False)
+        return sum(ms for _, ms in self.frames) / 1000
 
 
-def build(t, v):
-    cli_build = f", build {v['docker_cli_build']}" if v["docker_cli_build"] else ""
-    engine_build = f", build {v['docker_engine_build']}" if v["docker_engine_build"] else ""
+def nginx_run(t, cmd, container_id):
+    t.type_cmd(cmd, before=500, step=2, speed=40)
+    t.out("Unable to find image 'nginx:latest' locally", ms=250)
+    t.out("latest: Pulling from library/nginx", ms=550)
+    t.out("Status: Downloaded newer image for nginx:latest", ms=250)
+    t.out(container_id, DIM, ms=700)
+
+
+# ---- docs/demo.gif ----------------------------------------------------------------
+
+def build_demo(fonts, v):
+    t = Terminal(fonts, 920, 280, "Windows PowerShell", "PS C:\\Users\\dev> ")
+    rec = Recorder(920, 280, [(t, (0, 0))])
 
     # 1. docker is not there
-    t.type_cmd("docker --version", before=900)
+    t.type_cmd("docker run -d -p 8080:80 nginx", before=800, speed=40)
     t.out("docker : The term 'docker' is not recognized as the name of a cmdlet, function,", RED)
-    t.out("script file, or operable program. Check the spelling of the name, or if a path", RED)
-    t.out("was included, verify that the path is correct and try again.", RED, ms=2200)
+    t.out("script file, or operable program.", RED, ms=1400)
 
     # 2. one-line install (sped up)
-    t.type_cmd("irm https://raw.githubusercontent.com/alozdev/wsl-docker-engine/main/install.ps1 | iex",
-               before=600, step=3, speed=35, after=500)
-    t.badge = ">> install sped up"
+    t.type_cmd(INSTALL_CMD, before=500, step=3, speed=30, after=400)
+    t.badge = ">> 2 min, sped up"
     t.out("")
-    t.out("wsl-docker-engine installer", WHITE, True)
-    t.out("Docker Engine on WSL 2 + Docker CLI for Windows, without Docker Desktop", ms=500)
-    t.step("Checking this PC")
-    t.ok("Windows build 26100, x64")
-    t.out("    Downloading installer files from github.com/alozdev/wsl-docker-engine", ms=300)
+    t.out("lindowin installer", WHITE, True)
+    t.out("Headless Linux Docker for Windows. Terminal only, no Docker Desktop.", ms=400)
     t.step("Checking WSL")
-    t.ok(f"WSL {v['wsl']}")
-    t.step("Preparing the 'docker' WSL distro")
-    t.out(f"    Downloading and installing {v['ubuntu']} as 'docker' (a few minutes)...", ms=900)
-    t.ok("Distro 'docker' created", ms=300)
+    t.ok(f"WSL {v['wsl']}", ms=150)
     t.step("Installing Docker Engine inside WSL")
-    t.out("  [wsl] Configuring /etc/wsl.conf", ms=180)
-    t.out("  [wsl] Installing socat", ms=250)
-    t.out("  [wsl] Installing Docker Engine (official script from get.docker.com)", ms=1000)
-    t.out(f"  [wsl] Installed: Docker version {v['docker']}{engine_build}", ms=200)
-    t.out("  [wsl] Automatic updates enabled for Docker Engine", ms=150)
-    t.out("  [wsl] Done", ms=150)
-    t.out("    Restarting the distro so systemd and the new settings take effect...", ms=600)
-    t.ok("Docker Engine is running inside WSL", ms=300)
+    t.ok("Docker Engine is running inside WSL", ms=250)
     t.step("Installing the Docker CLI for Windows")
-    t.ok(f"docker.exe {v['docker']} installed (official static build)", ms=300)
-    t.ok(f"docker compose {v['compose']} installed (checksum verified)", ms=250)
-    t.ok(f"docker buildx {v['buildx']} installed (checksum verified)", ms=250)
-    t.step("Building the Docker pipe relay")
-    t.ok("Relay built", ms=250)
-    t.step("Configuring your user environment")
-    t.ok("Added to your PATH", ms=150)
-    t.ok("COMPOSE_CONVERT_WINDOWS_PATHS=1 (compose bind mounts like ./data work)", ms=150)
-    t.ok("Starts automatically at sign-in", ms=200)
+    t.ok(f"docker.exe {v['docker']} installed (official static build)", ms=150)
+    t.ok(f"docker compose {v['compose']} installed (checksum verified)", ms=150)
+    t.ok(f"docker buildx {v['buildx']} installed (checksum verified)", ms=150)
+    t.step("Configuring how published ports reach the network")
+    t.ok("Mirrored networking: ports work exactly like on Linux (TCP/UDP, any IP)", ms=250)
     t.step("Starting and testing")
-    t.ok(f"docker.exe {v['docker']}  ->  Docker Engine {v['docker']}", ms=400)
-    t.out("")
-    t.out("Done!", GREEN, True, ms=1600)
+    t.ok(f"docker.exe {v['docker']}  ->  Docker Engine {v['docker']}", ms=300)
+    t.out("Done!", GREEN, True, ms=1000)
     t.badge = None
 
-    # 3. docker works
-    t.type_cmd("docker --version", before=600)
-    t.out(f"Docker version {v['docker']}{cli_build}", ms=1000)
-    t.type_cmd("docker run --rm hello-world", before=500)
-    t.out("Unable to find image 'hello-world:latest' locally", ms=250)
-    t.out("latest: Pulling from library/hello-world", ms=450)
-    t.out("Status: Downloaded newer image for hello-world:latest", ms=300)
+    # 3. a Linux image just works
     t.out("")
-    t.out("Hello from Docker!", WHITE, True)
-    t.out("This message shows that your installation appears to be working correctly.", ms=300)
+    nginx_run(t, "docker run -d -p 8080:80 nginx", "3f9c2b7e41d8a05e6c1f9b2d7a4e8c03b5d6f1a2e9c7b4d8f0a3e6c9b2d5f7a1")
+    t.type_cmd("curl.exe -s localhost:8080 | findstr title", before=400, speed=40)
+    t.out("<title>Welcome to nginx!</title>", GREEN, True, ms=600)
     t.out("")
-    t.lines.append([(PROMPT, FG, False)])
-    t.snap(600)
-    for _ in range(4):          # blinking cursor at the end
-        t.snap(450, cursor=False)
-        t.snap(450, cursor=True)
-    t.snap(2500)
+    t.prompt_line()
+    rec.blink(t, times=2, end=2200)
+    return rec
+
+
+# ---- docs/compare.gif -------------------------------------------------------------
+
+def build_compare(fonts, v):
+    pw, ph, gap = 520, 250, 16
+    left = Terminal(fonts, pw, ph, "Windows Server 2022: native Docker", "PS C:\\> ")
+    right = Terminal(fonts, pw, ph, "Windows Server 2022: lindowin", "PS C:\\> ")
+    rec = Recorder(pw * 2 + gap, ph, [(left, (0, 0)), (right, (pw + gap, 0))])
+    left.prompt_line()
+    right.prompt_line()
+    right.cursor = False
+
+    # Left: Windows containers only, so a Linux image cannot run
+    left.type_cmd("docker run -d -p 80:80 nginx", before=900, speed=45)
+    left.out("Unable to find image 'nginx:latest' locally", ms=300)
+    left.out("latest: Pulling from library/nginx", ms=700)
+    left.out("docker: no matching manifest for windows/amd64", RED)
+    left.out("10.0.20348 in the manifest list entries.", RED, ms=600)
+    left.out("")
+    left.out("X  Linux images don't run here", RED, True, ms=1200)
+    left.prompt_line()
+    left.cursor = False
+
+    # Right: same command, real Linux Docker
+    nginx_run(right, "docker run -d -p 80:80 nginx", "3f9c2b7e41d8a05e6c1f9b2d7a4e8c03b5d...")
+    right.type_cmd("curl.exe -s localhost | findstr title", before=300, speed=40)
+    right.out("<title>Welcome to nginx!</title>", GREEN, True, ms=500)
+    right.out("")
+    right.out("OK Linux images just work", GREEN, True, ms=400)
+    right.prompt_line()
+    rec.blink(right, times=3, end=3000)
+    return rec
+
+
+# ---- docs/social-preview.png ------------------------------------------------------
+
+def build_social(fonts, v):
+    W, H = 1280, 640
+    img = Image.new("RGB", (W * S, H * S), (15, 15, 18))
+    d = ImageDraw.Draw(img)
+    title = fonts.ui_font(96, bold=True)
+    sub = fonts.ui_font(34, bold=False)
+    small = fonts.ui_font(24, bold=False)
+    d.text((80 * S, 70 * S), "lindowin", font=title, fill=WHITE)
+    d.text((84 * S, 210 * S), "Headless Linux Docker for Windows", font=sub, fill=CYAN)
+    d.text((84 * S, 262 * S), "Terminal only. No GUI. One command.", font=small, fill=DIM)
+    img = img.resize((W, H), Image.LANCZOS)
+
+    t = Terminal(fonts, 1120, 168, "Windows PowerShell", "PS C:\\> ")
+    t.lines = [
+        [(t.prompt, FG, False), ("docker run -d -p 8080:80 nginx", YELLOW, False)],
+        [("3f9c2b7e41d8a05e6c1f9b2d7a4e8c03b5d6f1a2e9c7b4d8f0a3e6c9b2d5f7a1", DIM, False)],
+        [(t.prompt, FG, False), ("curl.exe -s localhost:8080 | findstr title", YELLOW, False)],
+        [("<title>Welcome to nginx!</title>", GREEN, True)],
+        [(t.prompt, FG, False)],
+    ]
+    pane = t.render()
+    img.paste(pane, (80, 392), t.mask())
+    return img
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--out", default=os.path.join(ROOT, "docs", "demo.gif"))
+    p.add_argument("--out-dir", default=os.path.join(ROOT, "docs"))
     p.add_argument("--fonts", default=None)
     args = p.parse_args()
 
     versions = get_versions()
     print("versions:", json.dumps(versions))
-    t = Terminal(get_fonts_dir(args.fonts))
-    build(t, versions)
-    t.save_gif(args.out)
-    with open(os.path.join(os.path.dirname(args.out), "demo-versions.json"), "w", encoding="utf-8") as f:
+    fonts = Fonts(get_fonts_dir(args.fonts))
+
+    for name, builder in (("demo.gif", build_demo), ("compare.gif", build_compare)):
+        rec = builder(fonts, versions)
+        secs = rec.save_gif(os.path.join(args.out_dir, name))
+        print(f"{name}: {len(rec.frames)} frames, {secs:.1f} s")
+    build_social(fonts, versions).save(os.path.join(args.out_dir, "social-preview.png"), optimize=True)
+    print("social-preview.png: 1280x640")
+
+    with open(os.path.join(args.out_dir, "demo-versions.json"), "w", encoding="utf-8") as f:
         json.dump(versions, f, indent=2, sort_keys=True)
         f.write("\n")
-    print(f"{args.out}: {len(t.frames)} frames, {sum(ms for _, ms in t.frames) / 1000:.1f} s")
 
 
 if __name__ == "__main__":

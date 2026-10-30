@@ -4,10 +4,11 @@
 // the same endpoint Docker Desktop uses, so the Windows docker.exe works with no
 // DOCKER_HOST and no TCP port.
 //
-// Usage: docker-pipe-relay.exe [--distro <name>] [--no-keepalive]
+// Usage: docker-pipe-relay.exe [--distro <name>] [--no-keepalive] [--wsl-ip-file <path>]
 //
 // Security
-//  - Only the current Windows user can connect; remote (network) clients are rejected.
+//  - Only the current Windows user, members of the local "docker-users" group and
+//    SYSTEM (used by the port sync service) can connect; remote clients are rejected.
 //  - If another program already owns \\.\pipe\docker_engine, the relay refuses to start
 //    (prevents something else from impersonating Docker).
 //
@@ -19,6 +20,10 @@
 // Keep-alive
 //  - On start, a "sleep infinity" process keeps the distro (and Docker) running.
 //    It is started once and not restarted if you stop the distro yourself.
+//
+// WSL IP
+//  - With --wsl-ip-file, the distro's internal IP is written to that file while the
+//    distro runs. The port sync service uses it to forward ports in "portproxy" mode.
 
 using System;
 using System.Collections.Generic;
@@ -47,10 +52,12 @@ class DockerPipeRelay
     static int Main(string[] args)
     {
         bool keepAlive = true;
+        string ipFile = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--distro" && i + 1 < args.Length) distro = args[++i];
             else if (args[i] == "--no-keepalive") keepAlive = false;
+            else if (args[i] == "--wsl-ip-file" && i + 1 < args.Length) ipFile = args[++i];
         }
         wslArgs = "-d " + distro + " -u root -- socat -t 5 - UNIX-CONNECT:/var/run/docker.sock";
 
@@ -66,6 +73,17 @@ class DockerPipeRelay
             PipeAccessRights.FullControl, AccessControlType.Deny));
         security.AddAccessRule(new PipeAccessRule(
             WindowsIdentity.GetCurrent().User, PipeAccessRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            PipeAccessRights.ReadWrite, AccessControlType.Allow));
+        try
+        {
+            var group = (SecurityIdentifier)new NTAccount("docker-users").Translate(typeof(SecurityIdentifier));
+            security.AddAccessRule(new PipeAccessRule(group, PipeAccessRights.ReadWrite, AccessControlType.Allow));
+        }
+        catch { } // group does not exist: only the current user and SYSTEM
+
+        if (ipFile != null) StartIpWriter(ipFile);
 
         bool first = true;
         while (true)
@@ -149,6 +167,59 @@ class DockerPipeRelay
             p.BeginErrorReadLine();
         }
         return p;
+    }
+
+    static string RunWsl(string arguments)
+    {
+        var psi = new ProcessStartInfo("wsl.exe", arguments)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        psi.EnvironmentVariables["WSL_UTF8"] = "1";
+        using (var p = Process.Start(psi))
+        {
+            p.ErrorDataReceived += (s, e) => { };
+            p.BeginErrorReadLine();
+            string output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(15000);
+            return output.Replace("\0", "");
+        }
+    }
+
+    // Writes the distro's internal IPv4 address to a file while it runs
+    // (never starts the distro by itself).
+    static void StartIpWriter(string path)
+    {
+        new Thread(() =>
+        {
+            string last = null;
+            while (true)
+            {
+                try
+                {
+                    string running = RunWsl("--list --running --quiet");
+                    bool isRunning = false;
+                    foreach (var line in running.Split('\n'))
+                        if (line.Trim() == distro) isRunning = true;
+                    if (isRunning)
+                    {
+                        var ips = RunWsl("-d " + distro + " -u root -- hostname -I")
+                            .Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                        string ip = ips.Length > 0 ? ips[0] : null;
+                        if (ip != null && ip != last)
+                        {
+                            File.WriteAllText(path, ip);
+                            last = ip;
+                        }
+                    }
+                }
+                catch (Exception e) { Log("Could not read the WSL IP: " + e.Message); }
+                Thread.Sleep(20000);
+            }
+        }) { IsBackground = true }.Start();
     }
 
     static void StartKeepAlive()

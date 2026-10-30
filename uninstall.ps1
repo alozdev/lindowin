@@ -1,10 +1,12 @@
 <#
 .SYNOPSIS
-  Removes wsl-docker-engine from Windows.
+  Removes lindowin (Linux Docker for Windows) from Windows.
 
 .DESCRIPTION
   Removes the Windows side: docker.exe, compose/buildx plugins, the pipe relay,
-  the sign-in launcher, and the PATH / environment changes.
+  the start task, the port rules service with every firewall / portproxy rule it
+  created, the docker-users group (if it created it), the PATH / environment
+  changes, and restores your original .wslconfig.
 
   The WSL distro (with your containers, images and volumes) is KEPT unless you
   pass -RemoveDistro.
@@ -40,7 +42,7 @@ if (Test-Path $config) {
 }
 
 Write-Host ""
-Write-Host "wsl-docker-engine uninstaller" -ForegroundColor White
+Write-Host "lindowin uninstaller" -ForegroundColor White
 
 if ($RemoveDistro -and -not $Yes) {
     Write-Host ""
@@ -53,10 +55,44 @@ if ($RemoveDistro -and -not $Yes) {
 Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
 Write-Ok "Pipe relay stopped"
 
+# Admin part: start task, port rules service, firewall / portproxy rules, docker-users group
+$setupScript = Join-Path $InstallDir "installer\system-setup.ps1"
+if (Test-Path $setupScript) {
+    Write-Host "    Windows will ask for administrator permission once (to remove tasks and firewall rules)."
+    $result = Join-Path ([IO.Path]::GetTempPath()) ("wsl-docker-engine-uninstall-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".txt")
+    $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$setupScript`"", "-Action", "Uninstall", "-ResultFile", "`"$result`"")
+    $id = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    try {
+        if ($id.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            Start-Process powershell.exe -ArgumentList $argList -WindowStyle Hidden -Wait
+        } else {
+            Start-Process powershell.exe -ArgumentList $argList -Verb RunAs -WindowStyle Hidden -Wait
+        }
+    } catch { }
+    if ((Test-Path $result) -and (Get-Content $result -Raw).Trim() -eq "OK") {
+        Write-Ok "Start task, port rules and docker-users group removed"
+    } else {
+        Write-Host "    !   Could not remove the start task / firewall rules (administrator permission needed)." -ForegroundColor Yellow
+        Write-Host "        Run the uninstaller again and accept the prompt." -ForegroundColor Yellow
+    }
+    Remove-Item $result -ErrorAction SilentlyContinue
+}
+
 $launcher = Join-Path ([Environment]::GetFolderPath("Startup")) "wsl-docker-engine.vbs"
 if (Test-Path $launcher) { Remove-Item $launcher -Force }
 Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name "wsl-docker-engine" -ErrorAction SilentlyContinue
-Write-Ok "Sign-in launcher removed"
+
+# Put back the user's original .wslconfig if the installer turned on mirrored networking
+$wslconfig = Join-Path $env:USERPROFILE ".wslconfig"
+$backup = Join-Path $InstallDir "wslconfig.original"
+$noFile = Join-Path $InstallDir "wslconfig.original.none"
+if (Test-Path $noFile) {
+    Remove-Item $wslconfig -Force -ErrorAction SilentlyContinue
+    Write-Ok ".wslconfig removed (it did not exist before). Takes effect after: wsl --shutdown"
+} elseif (Test-Path $backup) {
+    Copy-Item $backup $wslconfig -Force
+    Write-Ok ".wslconfig restored. Takes effect after: wsl --shutdown"
+}
 
 $bin = Join-Path $InstallDir "bin"
 $path = [Environment]::GetEnvironmentVariable("Path", "User")

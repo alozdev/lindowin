@@ -1,6 +1,6 @@
-# Keeps docs/demo.gif up to date with the latest Docker / compose / buildx / WSL
+# Keeps the README images (demo.gif, compare.gif, social-preview.png) up to date with the latest Docker / compose / buildx / WSL
 # versions. Runs weekly; commits only when a version changed.
-name: Update demo GIF
+name: Update README images
 
 on:
   schedule:
@@ -51,6 +51,6 @@ jobs:
           summary=$(python -c "import json; v=json.load(open('docs/demo-versions.json')); print(f\"Docker {v['docker']}, compose {v['compose']}, buildx {v['buildx']}, WSL {v['wsl']}\")")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/demo.gif docs/demo-versions.json
-          git commit -m "Update demo GIF ($summary)"
+          git add docs/demo.gif docs/compare.gif docs/social-preview.png docs/demo-versions.json
+          git commit -m "Update README images ($summary)"
           git push
