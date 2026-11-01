@@ -223,6 +223,12 @@ Podman is a good option too. This project is for people who want the real Docker
 **Why not set `DOCKER_HOST=tcp://localhost:2375`?**
 That opens an unauthenticated root-level port. Also, WSL's localhost forwarding breaks the streams `docker run` uses to show output, so you would not see your containers' output. The named pipe avoids both problems.
 
+## Contributing
+
+Issues and pull requests are welcome: bug reports, tests on other Windows versions, ideas. If lindowin is useful to you, a ⭐ helps others find it.
+
+[![Contributors](https://contrib.rocks/image?repo=alozdev/lindowin)](https://github.com/alozdev/lindowin/graphs/contributors)
+
 ## Licenses
 
 This project's scripts and relay are under the [MIT License](LICENSE).

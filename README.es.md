@@ -223,6 +223,12 @@ Podman también es buena opción. Este proyecto es para quien quiere el Docker E
 **¿Por qué no usar `DOCKER_HOST=tcp://localhost:2375`?**
 Eso abre un puerto sin autenticación con acceso root. Además, el reenvío de localhost de WSL corta los streams que usa `docker run` para mostrar la salida, así que no verías la salida de tus contenedores. El named pipe evita ambos problemas.
 
+## Contribuir
+
+Los issues y pull requests son bienvenidos: reportes de bugs, pruebas en otras versiones de Windows, ideas. Si lindowin te sirve, una ⭐ ayuda a que más gente lo encuentre.
+
+[![Contributors](https://contrib.rocks/image?repo=alozdev/lindowin)](https://github.com/alozdev/lindowin/graphs/contributors)
+
 ## Licencias
 
 Los scripts y el relay de este proyecto usan la [licencia MIT](LICENSE).
