@@ -1,0 +1,70 @@
+# Publishes the website (website/) to GitHub Pages, with:
+#   /install             the current install.ps1 (so "irm <site>/install | iex" works)
+#   /demo.gif, ...       the README images from docs/
+# The site URL comes from website/CNAME (custom domain) or falls back to
+# https://<owner>.github.io/<repo>.
+name: Publish website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - website/**
+      - install.ps1
+      - docs/*.gif
+      - docs/*.png
+      - .github/workflows/pages.yml
+  workflow_run:                 # the images bot pushes with GITHUB_TOKEN, which does not trigger "push"
+    workflows: ["Update README images"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Build site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir _site
+          cp -r website/. _site/
+          cp docs/demo.gif docs/compare.gif docs/social-preview.png _site/
+          cp install.ps1 _site/install
+          touch _site/.nojekyll
+          if [ -f website/CNAME ]; then
+            url="https://$(tr -d '[:space:]' < website/CNAME)"
+          else
+            url="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          fi
+          sed -i "s#%SITE_URL%#${url}#g" _site/index.html
+          echo "Site URL: $url"
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
