@@ -176,6 +176,134 @@ EOF
   log "Automatic updates enabled for Docker Engine"
 fi
 
+# ---- Small system journal (less memory used as file cache) ---------------------
+
+JOURNAL_CONF=/etc/systemd/journald.conf.d/50-lindowin.conf
+journal_want="[Journal]
+SystemMaxUse=64M
+RuntimeMaxUse=16M"
+if [ "$(cat "$JOURNAL_CONF" 2>/dev/null || true)" != "$journal_want" ]; then
+  mkdir -p "$(dirname "$JOURNAL_CONF")"
+  printf '%s\n' "$journal_want" > "$JOURNAL_CONF"
+  if [ "$(ps -p 1 -o comm= 2>/dev/null)" = "systemd" ]; then
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
+    journalctl --vacuum-size=64M >/dev/null 2>&1 || true
+  fi
+  log "System journal limited to 64 MB"
+fi
+
+# ---- Faster Docker start -------------------------------------------------------------
+
+# nftables firewall: Docker writes all its rules at once instead of hundreds of iptables
+# calls (start-up goes from ~4.5 s to ~1 s). Published ports, networks and compose work
+# the same. A firewall-backend you chose yourself is kept.
+docker_restart=0
+if [ -x "$(command -v python3)" ]; then
+  if python3 - <<'PYEOF'
+import json, os, sys
+p = "/etc/docker/daemon.json"
+d = {}
+if os.path.exists(p):
+    try:
+        d = json.load(open(p))
+    except Exception:
+        sys.exit(1)          # unreadable file: leave it alone
+if "firewall-backend" in d:
+    sys.exit(1)
+d["firewall-backend"] = "nftables"
+os.makedirs("/etc/docker", exist_ok=True)
+json.dump(d, open(p, "w"), indent=2)
+PYEOF
+  then
+    docker_restart=1
+    log "Docker uses the nftables firewall (faster start)"
+  fi
+fi
+# With nftables Docker does not turn on packet forwarding itself: do it at boot
+FORWARD_CONF=/etc/sysctl.d/90-lindowin-docker.conf
+if [ ! -f "$FORWARD_CONF" ]; then
+  printf '%s\n' "# Created by lindowin: Docker needs packet forwarding" "net.ipv4.ip_forward = 1" > "$FORWARD_CONF"
+  sysctl -q -p "$FORWARD_CONF" >/dev/null 2>&1 || true
+fi
+if [ "$docker_restart" = 1 ] && [ "$(ps -p 1 -o comm= 2>/dev/null)" = "systemd" ]; then
+  systemctl restart docker >/dev/null 2>&1 || true
+fi
+
+# live-restore: when Ubuntu updates Docker Engine in the background, running containers
+# keep running instead of being stopped and restarted. Not compatible with Docker Swarm,
+# so it is skipped there. A value you set yourself is kept.
+swarm="$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo inactive)"
+if [ -x "$(command -v python3)" ] && { [ "$swarm" = "inactive" ] || [ -z "$swarm" ]; }; then
+  if python3 - <<'PYEOF'
+import json, os, sys
+p = "/etc/docker/daemon.json"
+d = {}
+if os.path.exists(p):
+    try:
+        d = json.load(open(p))
+    except Exception:
+        sys.exit(1)
+if "live-restore" in d:
+    sys.exit(1)
+d["live-restore"] = True
+os.makedirs("/etc/docker", exist_ok=True)
+json.dump(d, open(p, "w"), indent=2)
+PYEOF
+  then
+    # live-restore can be changed without restarting Docker (running containers keep going)
+    if [ "$(ps -p 1 -o comm= 2>/dev/null)" = "systemd" ] && systemctl is-active --quiet docker; then
+      systemctl reload docker >/dev/null 2>&1 || true
+    fi
+    log "Docker updates no longer stop running containers (live-restore)"
+  fi
+fi
+
+# Stopping Docker on purpose ("lindowin stop", "lindowin compact"): with live-restore,
+# containers would keep running and then be cut off when WSL stops. This turns it off for
+# a moment, so containers shut down cleanly and keep their restart policy.
+cat > /usr/local/sbin/lindowin-stop-docker <<'EOF'
+#!/bin/sh
+# Created by lindowin: stop Docker so containers shut down cleanly
+cfg=/etc/docker/daemon.json
+restore=0
+if [ -f "$cfg" ] && grep -q '"live-restore": true' "$cfg"; then
+  sed -i 's/"live-restore": true/"live-restore": false/' "$cfg"
+  systemctl reload docker 2>/dev/null && sleep 1
+  restore=1
+fi
+systemctl stop docker.socket docker 2>/dev/null
+if [ "$restore" = 1 ]; then sed -i 's/"live-restore": false/"live-restore": true/' "$cfg"; fi
+exit 0
+EOF
+chmod 755 /usr/local/sbin/lindowin-stop-docker
+
+# ---- Lighter system ----------------------------------------------------------------
+
+# Services a Docker-only distro never uses: they slow every start (~4.5 s) and use memory.
+# Kept: Docker, containerd, cron, DNS, time sync, automatic security updates, log rotation.
+unneeded="rsyslog.service landscape-client.service wsl-pro.service ubuntu-advantage.service ua-reboot-cmds.service
+ua-timer.timer motd-news.timer snapd.service snapd.socket snapd.seeded.service snapd.apparmor.service
+snapd.autoimport.service snapd.core-fixup.service snapd.recovery-chooser-trigger.service snapd.system-shutdown.service
+snapd.snap-repair.timer apport.service apport-forward.socket apport-autoreport.timer console-setup.service
+keyboard-setup.service setvtrgb.service networkd-dispatcher.service e2scrub_reap.service e2scrub_all.timer
+dmesg.service man-db.timer"
+turned_off=0
+for u in $unneeded; do
+  # Works before systemd runs too (first install); stopping them now only when it does
+  if systemctl is-enabled "$u" >/dev/null 2>&1; then
+    systemctl disable "$u" >/dev/null 2>&1 || true
+    [ "$(ps -p 1 -o comm= 2>/dev/null)" = "systemd" ] && systemctl stop "$u" >/dev/null 2>&1
+    turned_off=$((turned_off + 1))
+  fi
+done
+# snapd and the Ubuntu Pro / Landscape agents can re-enable themselves on updates
+systemctl mask snapd.service snapd.socket snapd.seeded.service landscape-client.service wsl-pro.service >/dev/null 2>&1 || true
+if [ "$turned_off" -gt 0 ]; then log "Turned off $turned_off services a Docker-only system does not need (faster start)"; fi
+# cloud-init only matters for cloud VMs
+mkdir -p /etc/cloud && touch /etc/cloud/cloud-init.disabled
+# Downloaded package files are not needed after installing
+apt-get clean >/dev/null 2>&1 || true
+
 touch /etc/wsl-docker-engine
 
 # Tell the installer whether the distro must restart (new wsl.conf or no systemd yet)

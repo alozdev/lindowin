@@ -33,7 +33,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASCADIA_ZIP = "https://github.com/microsoft/cascadia-code/releases/download/v2407.24/CascadiaCode-2407.24.zip"
-INSTALL_CMD = "irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex"
+INSTALL_CMD = "irm https://lindowin.dev/install | iex"
 UA = {"User-Agent": "lindowin-demo"}
 
 
@@ -382,7 +382,14 @@ def build_social(fonts, v):
     INK, SOFT, MUTED = (17, 17, 20), (70, 70, 78), (140, 140, 150)
     img = Image.new("RGB", (W * S, H * S), (255, 255, 255))
     d = ImageDraw.Draw(img)
-    x, y = 80, 196
+    x, y = 80, 214
+
+    # Logo: dark circle, the "l" of lindowin and a green cursor ("l_")
+    u, ix, iy = 64 * S / 64, x + 4, y - 70
+    d.ellipse([ix * S, iy * S, (ix + 64) * S - 1, (iy + 64) * S - 1], fill=INK)
+    d.rounded_rectangle([ix * S + 20 * u, iy * S + 14 * u, ix * S + 28 * u, iy * S + 50 * u], radius=4 * u, fill=(255, 255, 255))
+    d.rounded_rectangle([ix * S + 32 * u, iy * S + 42 * u, ix * S + 46 * u, iy * S + 50 * u], radius=4 * u, fill=(78, 194, 127))
+
     d.text((x * S, y * S), "lindowin", font=fonts.ui_font(80, bold=True), fill=INK)
     d.text(((x + 3) * S, (y + 118) * S), "Headless Linux Docker", font=fonts.ui_font(30, bold=False), fill=SOFT)
     d.text(((x + 3) * S, (y + 158) * S), "for Windows.", font=fonts.ui_font(30, bold=False), fill=SOFT)
@@ -411,6 +418,31 @@ def build_social(fonts, v):
     return img
 
 
+# ---- assets/logo/lindowin-wordmark(-dark).png ----------------------------------------
+
+def build_wordmark(fonts, dark):
+    """Logo mark + name, for the top of the README. dark=True: for dark backgrounds."""
+    H = 96                       # final height (shown at half size on GitHub, so it stays sharp)
+    ink = (242, 242, 244) if dark else (17, 17, 20)
+    hole = (14, 14, 17) if dark else (255, 255, 255)
+    cursor = (31, 138, 76) if dark else (78, 194, 127)
+    font = fonts.ui_font(64, bold=True)
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    text_w = probe.textlength("lindowin", font=font) / S
+    W = int(H + 22 + text_w + 6)
+    img = Image.new("RGBA", (W * S, H * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    u = H * S / 64
+    d.ellipse([0, 0, H * S - 1, H * S - 1], fill=ink)
+    d.rounded_rectangle([20 * u, 14 * u, 28 * u, 50 * u], radius=4 * u, fill=hole)
+    d.rounded_rectangle([32 * u, 42 * u, 46 * u, 50 * u], radius=4 * u, fill=cursor)
+    # baseline-ish vertical centering of the word next to the mark
+    box = d.textbbox((0, 0), "lindowin", font=font)
+    ty = (H * S - (box[3] - box[1])) / 2 - box[1]
+    d.text(((H + 22) * S, ty), "lindowin", font=font, fill=ink)
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out-dir", default=os.path.join(ROOT, "assets"))
@@ -426,6 +458,9 @@ def main():
         secs = rec.save_gif(os.path.join(args.out_dir, name))
         print(f"{name}: {len(rec.frames)} frames, {secs:.1f} s")
     build_social(fonts, versions).save(os.path.join(args.out_dir, "social-preview.png"), optimize=True)
+    for dark, name in ((False, "lindowin-wordmark.png"), (True, "lindowin-wordmark-dark.png")):
+        build_wordmark(fonts, dark).save(os.path.join(args.out_dir, "logo", name), optimize=True)
+    print("wordmarks: logo/lindowin-wordmark.png, logo/lindowin-wordmark-dark.png")
     print("social-preview.png: 1280x640")
 
     with open(os.path.join(args.out_dir, "demo-versions.json"), "w", encoding="utf-8") as f:

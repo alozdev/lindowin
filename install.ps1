@@ -19,10 +19,15 @@
   Asks for administrator permission once (firewall rules, start task).
 
 .EXAMPLE
-  irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex
+  irm https://lindowin.dev/install | iex
 
 .EXAMPLE
-  .\install.ps1 -Server
+  .\install.ps1 -StartAt boot -IdleSleep off
+.EXAMPLE
+  .\install.ps1 -AllUsers
+
+.NOTES
+  After installing, the "lindowin" command manages it: lindowin help
 #>
 [CmdletBinding()]
 param(
@@ -30,8 +35,20 @@ param(
     [string]$Distro = "docker",
     # Where the Windows files are installed
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\wsl-docker-engine"),
-    # Start Docker at boot without anyone signing in (automatic on Windows Server)
+    # Start Docker at boot without anyone signing in (same as -StartAt boot)
     [switch]$Server,
+    # When Docker starts: "boot" (no sign-in needed, default on Windows Server) or "signin" (default on PCs).
+    # Remembered: updates keep your choice.
+    [ValidateSet("", "boot", "signin")]
+    [string]$StartAt = "",
+    # Idle sleep: stop the Linux VM after 5 minutes with no containers running, to free memory.
+    # Default: on for PCs, off when Docker starts at boot. Remembered.
+    [ValidateSet("", "on", "off")]
+    [string]$IdleSleep = "",
+    # Share Docker with every member of the local "docker-users" group (servers, shared PCs).
+    # Programs go to Program Files and the machine PATH; Docker starts at boot. Remembered.
+    # Use -AllUsers:$false to go back to a per-user install.
+    [switch]$AllUsers,
     # How published ports reach the network. "auto": mirrored if it works, otherwise portproxy.
     # "local": only this PC (no admin rules for ports).
     [ValidateSet("auto", "mirrored", "portproxy", "local")]
@@ -47,6 +64,7 @@ $ProgressPreference = "SilentlyContinue"   # makes Invoke-WebRequest much faster
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $env:WSL_UTF8 = "1"                       # wsl.exe prints UTF-8 instead of UTF-16
 
+$Version = "1.2.0"
 $Repo = "alozdev/lindowin"
 $UbuntuImage = "Ubuntu-24.04"
 
@@ -113,10 +131,22 @@ function Stop-DockerGracefully($name) {
     Invoke-Wsl @("-d", $name, "-u", "root", "--", "sh", "-c", "systemctl stop docker.service docker.socket >/dev/null 2>&1 || true") | Out-Null
 }
 
+function Stop-Relay {
+    # When Docker starts at boot the relay runs in a separate session, and a normal user
+    # cannot stop it: that is fine, the administrator step stops it. Returns $true if
+    # no relay is left running.
+    Stop-ScheduledTask -TaskName "wsl-docker-engine" -ErrorAction SilentlyContinue
+    Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | ForEach-Object {
+        try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch { }
+    }
+    Start-Sleep -Milliseconds 500
+    return -not (Get-Process docker-pipe-relay -ErrorAction SilentlyContinue)
+}
+
 function Restart-Wsl($name) {
     # .wslconfig changes need a full WSL restart (all distros)
     Stop-DockerGracefully $name
-    Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
+    Stop-Relay | Out-Null
     Invoke-Wsl @("--shutdown") | Out-Null
     Start-Sleep 2
     Start-TempKeepAlive $name
@@ -132,15 +162,31 @@ function Test-WslInternet($name) {
     return $false
 }
 
-function Get-WslNetworkingMode {
+function Get-WslConfigValue($sectionName, $key) {
+    # Reads [section] key=value from .wslconfig ($null if not set)
     $f = Join-Path $env:USERPROFILE ".wslconfig"
-    if (-not (Test-Path $f)) { return "nat" }
+    if (-not (Test-Path $f)) { return $null }
     $section = ""
     foreach ($line in Get-Content $f) {
         if ($line -match "^\s*\[(.+)\]\s*$") { $section = $Matches[1].Trim().ToLower(); continue }
-        if ($section -eq "wsl2" -and $line -match "^\s*networkingMode\s*=\s*(\w+)") { return $Matches[1].ToLower() }
+        if ($section -eq $sectionName -and $line -match "^\s*$key\s*=\s*(\S+)") { return $Matches[1] }
     }
-    return "nat"
+    return $null
+}
+
+function Get-WslNetworkingMode {
+    $v = Get-WslConfigValue "wsl2" "networkingMode"
+    if ($v) { return $v.ToLower() } else { return "nat" }
+}
+
+function Backup-WslConfig {
+    # Saves the user's original .wslconfig once (the uninstaller puts it back)
+    $wslconfig = Join-Path $env:USERPROFILE ".wslconfig"
+    $backup = Join-Path $InstallDir "wslconfig.original"
+    $noFile = Join-Path $InstallDir "wslconfig.original.none"
+    if (-not (Test-Path $backup) -and -not (Test-Path $noFile)) {
+        if (Test-Path $wslconfig) { Copy-Item $wslconfig $backup } else { New-Item -ItemType File $noFile | Out-Null }
+    }
 }
 
 function Set-WslConfigValue($sectionName, $key, $value) {
@@ -172,6 +218,22 @@ function Set-WslConfigValue($sectionName, $key, $value) {
     return $true
 }
 
+function Remove-WslConfigValue($sectionName, $key) {
+    # Removes [section] key=... from .wslconfig. Returns $true if the file changed.
+    $f = Join-Path $env:USERPROFILE ".wslconfig"
+    if (-not (Test-Path $f)) { return $false }
+    $lines = @(Get-Content $f)
+    $section = ""
+    $out = foreach ($line in $lines) {
+        if ($line -match "^\s*\[(.+)\]\s*$") { $section = $Matches[1].Trim().ToLower() }
+        elseif ($section -eq $sectionName -and $line -match "^\s*$key\s*=") { continue }
+        $line
+    }
+    if (($lines -join "`n") -eq (@($out) -join "`n")) { return $false }
+    [IO.File]::WriteAllLines($f, [string[]]@($out))
+    return $true
+}
+
 function Set-WslNetworkingMode($value) { Set-WslConfigValue "wsl2" "networkingMode" $value | Out-Null }
 
 function Select-NetworkMode($name, $requested, $config) {
@@ -191,6 +253,12 @@ function Select-NetworkMode($name, $requested, $config) {
                 if (Test-Path $noFile) { Remove-Item $wslconfig -Force; Remove-Item $noFile -Force } else { Move-Item $backup $wslconfig -Force }
                 Write-Info "Restarting WSL to switch back to its default network (other WSL distros restart too)..."
                 Restart-Wsl $name
+            } elseif ($requested -eq "portproxy") {
+                # You asked for port forwarding: switch your own mirrored setting off (backed up)
+                Backup-WslConfig
+                Set-WslNetworkingMode "nat"
+                Write-Info "Restarting WSL to switch to its default network (other WSL distros restart too)..."
+                Restart-Wsl $name
             } else {
                 Write-Info "Your .wslconfig already uses mirrored networking: keeping it."
                 return "mirrored"
@@ -199,9 +267,7 @@ function Select-NetworkMode($name, $requested, $config) {
         return "portproxy"
     }
 
-    if (-not (Test-Path $backup) -and -not (Test-Path $noFile)) {
-        if (Test-Path $wslconfig) { Copy-Item $wslconfig $backup } else { New-Item -ItemType File $noFile | Out-Null }
-    }
+    Backup-WslConfig
     $changed = Set-WslConfigValue "wsl2" "networkingMode" "mirrored"
     # Lets this PC reach published ports through its own network IP too (like on Linux)
     if (Set-WslConfigValue "experimental" "hostAddressLoopback" "true") { $changed = $true }
@@ -322,6 +388,9 @@ function Add-UserPath($dir) {
 Write-Host ""
 Write-Host "lindowin installer" -ForegroundColor White
 Write-Host "Headless Linux Docker for Windows. Terminal only, no Docker Desktop."
+
+# A previous uninstall may have left a clean-up for the next sign-in: it must not delete this install
+Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name "lindowin-cleanup" -ErrorAction SilentlyContinue
 
 $script:TempDir = Join-Path ([IO.Path]::GetTempPath()) ("wsl-docker-engine-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -ItemType Directory -Force $script:TempDir | Out-Null
@@ -447,7 +516,7 @@ try {
         Write-Info "Restarting the distro so systemd and the new settings take effect..."
         # Stop Docker cleanly first: running containers get SIGTERM and can shut down properly
         Invoke-Wsl @("-d", $Distro, "-u", "root", "--", "sh", "-c", "systemctl stop docker.service docker.socket >/dev/null 2>&1 || true") | Out-Null
-        Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
+        Stop-Relay | Out-Null
         Invoke-Wsl @("--terminate", $Distro) | Out-Null
         Start-TempKeepAlive $Distro
     } else {
@@ -487,10 +556,12 @@ try {
     # ---- Pipe relay ----------------------------------------------------------------
     Write-Step "Building the Docker pipe relay"
     $relayExe = Join-Path $bin "docker-pipe-relay.exe"
-    Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Milliseconds 500
-    $r = Invoke-Native $csc @("/nologo", "/target:winexe", "/optimize", "/r:System.Core.dll", "/out:$relayExe", (Join-Path $src "src\relay\docker-pipe-relay.cs"))
+    $relayNew = Join-Path $bin "docker-pipe-relay.new.exe"
+    $r = Invoke-Native $csc @("/nologo", "/target:winexe", "/optimize", "/r:System.Core.dll", "/r:System.Management.dll", "/out:$relayNew", (Join-Path $src "src\relay\docker-pipe-relay.cs"))
     if ($r.Code -ne 0) { Write-Host $r.Text; Stop-Install "Could not build the pipe relay." }
+    $stopped = Stop-Relay
+    try { if (-not $stopped) { throw "busy" }; Move-Item $relayNew $relayExe -Force -ErrorAction Stop }
+    catch { Write-Info "The running relay belongs to the start task: it is replaced in the administrator step." }
     Write-Ok "Relay built: $relayExe"
 
     # ---- Environment ---------------------------------------------------------------
@@ -508,7 +579,9 @@ try {
         Write-Warn "Remove it if you want to use wsl-docker-engine."
     }
     $first = Get-Command docker.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($first -and $first.Source -ne $dockerExe) {
+    # Our own shared copy (Program Files) is replaced in the administrator step: not a conflict
+    $ownShared = Join-Path $env:ProgramFiles "wsl-docker-engine\bin\docker.exe"
+    if ($first -and $first.Source -ne $dockerExe -and $first.Source -ne $ownShared) {
         Write-Warn "Another docker.exe comes first in PATH: $($first.Source)"
         Write-Warn "Remove it from PATH (or uninstall it) so 'docker' uses this setup."
     }
@@ -516,12 +589,27 @@ try {
     # ---- Previous settings ----------------------------------------------------------
     $configPath = Join-Path $InstallDir "config.json"
     $config = @{ mirroredFailed = $false }
+    $old = $null
     if (Test-Path $configPath) {
         try {
             $old = Get-Content $configPath -Raw | ConvertFrom-Json
             if ($old.mirroredFailed) { $config.mirroredFailed = $true }
         } catch { }
     }
+    $isServerOS = (Get-CimInstance Win32_OperatingSystem).ProductType -ne 1
+    # Network: option > earlier choice ("lindowin config network ...") > auto
+    if (-not $PSBoundParameters.ContainsKey("NetworkMode") -and $old -and $old.networkChoice) { $NetworkMode = $old.networkChoice }
+    # All users: option > earlier choice > per-user
+    $allUsersValue = if ($PSBoundParameters.ContainsKey("AllUsers")) { [bool]$AllUsers } else { [bool]($old -and $old.allUsers) }
+    if ($allUsersValue -and $StartAt -eq "signin") { Stop-Install "-AllUsers shares Docker with everyone, so it must start at boot (not at sign-in)." }
+    if ($allUsersValue -and -not $StartAt) { $StartAt = "boot" }
+    # Start: option > earlier choice > Windows Server boots, PCs start at sign-in
+    $startAtValue = if ($StartAt) { $StartAt } elseif ($Server) { "boot" }
+                    elseif ($old -and $old.startAt) { $old.startAt } elseif ($old -and $old.server) { "boot" }
+                    elseif ($isServerOS) { "boot" } else { "signin" }
+    # Idle sleep: option > earlier choice > on for PCs, off when Docker starts at boot
+    $idleValue = if ($IdleSleep) { $IdleSleep } elseif ($old -and $old.idleSleep) { $old.idleSleep }
+                 elseif ($startAtValue -eq "boot") { "off" } else { "on" }
 
     # ---- Network -------------------------------------------------------------------
     Write-Step "Configuring how published ports reach the network"
@@ -532,17 +620,49 @@ try {
         "local"     { Write-Ok "Local only: published ports are reachable from this PC only (-NetworkMode local)" }
     }
 
+    # ---- Memory ----------------------------------------------------------------------
+    # Idle sleep frees the memory. Early 1.2.0 builds also set autoMemoryReclaim, which
+    # made no measurable difference: remove it, but only if lindowin added it (the
+    # user's original .wslconfig, saved in the backup, did not have it).
+    $backupFile = Join-Path $InstallDir "wslconfig.original"
+    $noFile = Join-Path $InstallDir "wslconfig.original.none"
+    $userHadIt = (Test-Path $backupFile) -and (Select-String -Path $backupFile -Pattern "^\s*autoMemoryReclaim\s*=" -Quiet)
+    if (((Test-Path $backupFile) -or (Test-Path $noFile)) -and -not $userHadIt -and
+        (Get-WslConfigValue "experimental" "autoMemoryReclaim") -eq "dropCache") {
+        Remove-WslConfigValue "experimental" "autoMemoryReclaim" | Out-Null   # applies on the next WSL start
+    }
+
+    # ---- Settings file and "lindowin" command ---------------------------------------------
+    $isServer = $startAtValue -eq "boot"
+    $notifyValue = (-not $isServerOS) -and (-not $allUsersValue)
+    $hashes = @("docker-compose.exe", "docker-buildx.exe") | ForEach-Object { Get-Sha256 (Join-Path $plugins $_) }
+    function Save-Settings {
+        # The relay re-reads this file while running; the uninstaller uses the plugin hashes
+        Set-Content -Path $configPath -Encoding ASCII -Value (@{
+            version = $Version; distro = $Distro; pluginHashes = $hashes; networkMode = $mode; networkChoice = $NetworkMode
+            startAt = $startAtValue; server = [bool]$isServer
+            idleSleep = $idleValue; idleSleepMinutes = $(if ($idleValue -eq "on") { 5 } else { 0 })
+            notify = $notifyValue; allUsers = $allUsersValue
+            mirroredSupported = ([Environment]::OSVersion.Version.Build -ge 22621)
+            owner = [Security.Principal.WindowsIdentity]::GetCurrent().Name; stageDir = $InstallDir
+            mirroredFailed = [bool]$config.mirroredFailed
+        } | ConvertTo-Json)
+    }
+    Save-Settings
+    Set-Content -Path (Join-Path $bin "lindowin.cmd") -Encoding ASCII -Value `
+        '@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\installer\src\lindowin.ps1" %* && exit /b 0 || exit /b 1'
+
     # ---- Administrator part (one permission prompt) ---------------------------------
-    $isServer = $Server -or ((Get-CimInstance Win32_OperatingSystem).ProductType -ne 1)
     Write-Step "Setting up automatic start and port rules"
-    if ($isServer) { Write-Info "Windows Server (or -Server): Docker will start at boot, even if nobody signs in." }
+    if ($isServer) { Write-Info "Docker will start at boot, even if nobody signs in." }
     Write-Info "Windows will ask for administrator permission once."
-    Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
+    Stop-Relay | Out-Null
     $setupArgs = @("-Action", "Install", "-InstallDir", "`"$InstallDir`"", "-Distro", $Distro,
                    "-UserName", "`"$([Security.Principal.WindowsIdentity]::GetCurrent().Name)`"", "-Mode", $mode)
     if ($isServer) { $setupArgs += "-StartAtBoot" }
+    if ($allUsersValue) { $setupArgs += @("-AllUsers", "-PluginDir", "`"$plugins`"") }
     $result = Invoke-SystemSetup $setupArgs
-    $relayArgs = @("--distro", $Distro, "--wsl-ip-file", "`"$(Join-Path $bin 'wsl-ip.txt')`"")
+    $relayArgs = @("--distro", $Distro, "--config", "`"$configPath`"", "--wsl-ip-file", "`"$(Join-Path $bin 'wsl-ip.txt')`"")
     if ($result -eq "OK") {
         Write-Ok "docker-users group, port rules service and start task are ready"
         if ($NoStartup) {
@@ -551,23 +671,39 @@ try {
         } else {
             Write-Ok ($(if ($isServer) { "Starts automatically at boot" } else { "Starts automatically at sign-in" }))
         }
+        if ($allUsersValue) {
+            Write-Ok "Shared with all users in 'docker-users' (programs in $env:ProgramFiles\wsl-docker-engine)"
+            # Everyone, including you, now uses the shared copy from the machine PATH
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            $kept = @($userPath -split ";" | Where-Object { $_ -and $_.TrimEnd("\") -ne $bin.TrimEnd("\") })
+            [Environment]::SetEnvironmentVariable("Path", ($kept -join ";"), "User")
+        }
     } else {
         if ($result -eq "DECLINED") { Write-Warn "Administrator permission was not granted." } else { Write-Warn $result }
         Write-Warn "Docker works, but only from this PC, and it will not start by itself."
         Write-Warn "Run the installer again and accept the prompt to finish the setup."
         $mode = "local"
+        $allUsersValue = $false
+        Save-Settings
     }
 
     # Old versions started from a .vbs in the Startup folder: the task replaces it
     $legacy = Join-Path ([Environment]::GetFolderPath("Startup")) "wsl-docker-engine.vbs"
     if (Test-Path $legacy) { Remove-Item $legacy -Force }
 
-    # Remember what was installed (the uninstaller only removes plugins with these hashes)
-    $hashes = @("docker-compose.exe", "docker-buildx.exe") | ForEach-Object { Get-Sha256 (Join-Path $plugins $_) }
-    Set-Content -Path $configPath -Encoding ASCII -Value (@{
-        distro = $Distro; pluginHashes = $hashes; networkMode = $mode; server = [bool]$isServer
-        mirroredFailed = [bool]$config.mirroredFailed
-    } | ConvertTo-Json)
+    # Name and logo for the "Starting Docker..." notification (PCs only; no window, no tray icon)
+    if ($notifyValue) {
+        $icon = Join-Path $InstallDir "lindowin.png"
+        $iconSrc = Join-Path $src "assets\logo\lindowin-icon-512.png"
+        if (Test-Path $iconSrc) { Copy-Item $iconSrc $icon -Force }
+        $aumid = "HKCU:\Software\Classes\AppUserModelId\lindowin"
+        New-Item -Path $aumid -Force | Out-Null
+        Set-ItemProperty -Path $aumid -Name DisplayName -Value "lindowin"
+        if (Test-Path $icon) { Set-ItemProperty -Path $aumid -Name IconUri -Value $icon }
+    }
+
+    if ($idleValue -eq "on") { Write-Ok "Idle sleep: after 5 minutes with no containers, Docker sleeps to free memory" }
+    else { Write-Ok "Idle sleep: off (Docker stays on)" }
 
     # ---- Start and test ------------------------------------------------------------
     Write-Step "Starting and testing"
@@ -588,8 +724,15 @@ try {
     }
     Write-Ok "docker.exe $cliVersion  ->  Docker Engine $engineVersion"
 
+    # Run with "irm ... | iex" this is the user's own PowerShell window: make docker and
+    # lindowin work in it right away (the PATH of other open windows cannot be changed).
+    $sameWindow = (-not $PSCommandPath) -or ($env:LINDOWIN_COMMAND -eq "1")
+    if ($sameWindow) {
+        $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    }
     Write-Host ""
-    Write-Host "Done! Open a NEW terminal and try:" -ForegroundColor Green
+    if ($sameWindow) { Write-Host "Done! Try it now:" -ForegroundColor Green }
+    else { Write-Host "Done! Open a NEW terminal and try:" -ForegroundColor Green }
     Write-Host "    docker run -d -p 8080:80 nginx   (then open http://localhost:8080)"
     Write-Host "    docker compose up -d"
     Write-Host ""
@@ -598,8 +741,15 @@ try {
         "portproxy" { Write-Host "Published ports:  like on Linux ('80:80' = network, '127.0.0.1:80:80' = this PC only)" }
         "mirrored"  { Write-Host "Published ports:  exactly like on Linux" }
     }
-    Write-Host "Stop Docker:      wsl --terminate $Distro"
-    Write-Host "Uninstall:        $installerCopy\uninstall.cmd"
+    if ($idleValue -eq "on") {
+        Write-Host "Idle sleep:       with no containers for 5 min, Docker sleeps to free memory."
+        Write-Host "                  The next docker command wakes it (a few seconds)."
+    }
+    if ($allUsersValue) {
+        Write-Host "Shared:           every member of 'docker-users' can use Docker. To add someone (as administrator):"
+        Write-Host "                  Add-LocalGroupMember docker-users <user>"
+    }
+    Write-Host "Manage:           lindowin status | update | config | stop | uninstall   (lindowin help)"
 }
 catch {
     # Our own errors were already printed nicely; show anything unexpected

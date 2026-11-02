@@ -52,8 +52,11 @@ if ($RemoveDistro -and -not $Yes) {
     if ($answer -ne $distro) { Write-Host "Cancelled."; return }
 }
 
-Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
-Write-Ok "Pipe relay stopped"
+# When Docker starts at boot, only the administrator step below can stop the relay
+Stop-ScheduledTask -TaskName "wsl-docker-engine" -ErrorAction SilentlyContinue
+Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | ForEach-Object {
+    try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch { }
+}
 
 # Admin part: start task, port rules service, firewall / portproxy rules, docker-users group
 $setupScript = Join-Path $InstallDir "installer\src\system-setup.ps1"
@@ -71,7 +74,7 @@ if (Test-Path $setupScript) {
         }
     } catch { }
     if ((Test-Path $result) -and (Get-Content $result -Raw).Trim() -eq "OK") {
-        Write-Ok "Start task, port rules and docker-users group removed"
+        Write-Ok "Pipe relay stopped; start task, port rules and docker-users group removed"
     } else {
         Write-Host "    !   Could not remove the start task / firewall rules (administrator permission needed)." -ForegroundColor Yellow
         Write-Host "        Run the uninstaller again and accept the prompt." -ForegroundColor Yellow
@@ -82,6 +85,8 @@ if (Test-Path $setupScript) {
 $launcher = Join-Path ([Environment]::GetFolderPath("Startup")) "wsl-docker-engine.vbs"
 if (Test-Path $launcher) { Remove-Item $launcher -Force }
 Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name "wsl-docker-engine" -ErrorAction SilentlyContinue
+# Name and logo registered for the "Starting Docker..." notification
+Remove-Item "HKCU:\Software\Classes\AppUserModelId\lindowin" -Recurse -ErrorAction SilentlyContinue
 
 # Put back the user's original .wslconfig if the installer turned on mirrored networking
 $wslconfig = Join-Path $env:USERPROFILE ".wslconfig"
@@ -117,7 +122,18 @@ Write-Ok "docker compose / buildx plugins removed (only the ones this tool insta
 
 if (Test-Path $InstallDir) {
     Set-Location $env:USERPROFILE
-    Remove-Item -Recurse -Force $InstallDir
+    # "lindowin uninstall" runs from bin\lindowin.cmd, and cmd keeps reading that file:
+    # delete everything else now, and that last file and its folders at the next sign-in.
+    $cmdFile = Join-Path $InstallDir "bin\lindowin.cmd"
+    Get-ChildItem $InstallDir -Recurse -Force -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ne $cmdFile } | Remove-Item -Force -ErrorAction SilentlyContinue
+    if (Test-Path $cmdFile) {
+        Set-Content -Path $cmdFile -Encoding ASCII -Value "@echo lindowin was uninstalled. & exit /b 0"
+        Set-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name "lindowin-cleanup" `
+            -Value "cmd.exe /c rmdir /s /q `"$InstallDir`""
+    } else {
+        Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
+    }
 }
 Write-Ok "Program files removed ($InstallDir)"
 
