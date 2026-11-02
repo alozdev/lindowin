@@ -94,7 +94,7 @@ try {
 
     if ($Mode -ne "local") {
         $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-        $source = Join-Path $InstallDir "installer\ports\docker-port-sync.cs"
+        $source = Join-Path $PSScriptRoot "ports\docker-port-sync.cs"
         $exe = Join-Path $ProgramDir "docker-port-sync.exe"
         $out = & $csc /nologo /target:winexe /optimize /r:System.Core.dll /r:System.Web.Extensions.dll "/out:$exe" $source 2>&1
         if ($LASTEXITCODE -ne 0) { throw "Could not build docker-port-sync: $out" }

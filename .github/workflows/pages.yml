@@ -1,6 +1,6 @@
 # Publishes the website (website/) to GitHub Pages, with:
 #   /install             the current install.ps1 (so "irm <site>/install | iex" works)
-#   /demo.gif, ...       the README images from docs/
+#   /demo.gif, ...       the README images from assets/
 # The site URL comes from website/CNAME (custom domain) or falls back to
 # https://<owner>.github.io/<repo>.
 name: Publish website
@@ -11,8 +11,8 @@ on:
     paths:
       - website/**
       - install.ps1
-      - docs/*.gif
-      - docs/*.png
+      - assets/*.gif
+      - assets/*.png
       - .github/workflows/pages.yml
   workflow_run:                 # the images bot pushes with GITHUB_TOKEN, which does not trigger "push"
     workflows: ["Update README images"]
@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           mkdir _site
           cp -r website/. _site/
-          cp docs/demo.gif docs/compare.gif docs/social-preview.png _site/
+          cp assets/demo.gif assets/compare.gif assets/social-preview.png _site/
           cp install.ps1 _site/install
           touch _site/.nojekyll
           if [ -f website/CNAME ]; then

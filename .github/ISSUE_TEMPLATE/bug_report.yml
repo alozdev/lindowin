@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! Please remove anything private (user names, IPs, hostnames) before posting.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows Server 2025
+        - Windows Server 2022
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Windows build and WSL version
+      description: Output of `winver` and `wsl --version`
+      placeholder: "26100, WSL 2.6.1"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Installer output and logs
+      description: |
+        Installer output, and if they exist:
+        `%LOCALAPPDATA%\Programs\wsl-docker-engine\bin\docker-pipe-relay.log`
+        `C:\ProgramData\wsl-docker-engine\port-sync.log`
+      render: text

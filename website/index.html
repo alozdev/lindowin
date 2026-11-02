@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e0e11" media="(prefers-color-scheme: dark)">
 <title>lindowin: Headless Linux Docker for Windows</title>
 <meta name="description" content="Real Linux Docker on Windows 10/11 and Windows Server, even Server Core. Terminal only, no GUI, no Docker Desktop. One command.">
 <link rel="canonical" href="%SITE_URL%/">
@@ -18,8 +21,16 @@
   :root {
     --ink: #111114; --soft: #46464e; --muted: #8c8c96; --line: #ececf0;
     --bg: #ffffff; --tint: #f7f7f9; --term: #18181b; --ok: #1f8a4c; --no: #c2414b;
+    --bar: rgba(255,255,255,.78); --term-line: transparent; --shadow: rgba(0,0,0,.12); --badge: #111114; --badge-ink: #fff;
     --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
     --mono: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #f2f2f4; --soft: #b4b4bd; --muted: #85858f; --line: #26262c;
+      --bg: #0e0e11; --tint: #17171b; --term: #18181b; --ok: #4ec27f; --no: #f07a83;
+      --bar: rgba(14,14,17,.75); --term-line: #2c2c33; --shadow: rgba(0,0,0,.5); --badge: #f2f2f4; --badge-ink: #0e0e11;
+    }
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -27,7 +38,12 @@
   a { color: inherit; }
   .wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
 
-  nav { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .top { position: sticky; top: 0; z-index: 10; background: var(--bar);
+          -webkit-backdrop-filter: saturate(180%) blur(14px); backdrop-filter: saturate(180%) blur(14px);
+          border-bottom: 1px solid transparent; transition: border-color .2s; }
+  .top.scrolled { border-bottom-color: var(--line); }
+  nav { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  html { scroll-padding-top: 80px; }
   .brand { font-weight: 650; font-size: 19px; text-decoration: none; letter-spacing: -0.01em; }
   .links { display: flex; gap: 22px; font-size: 15px; }
   .links a { color: var(--soft); text-decoration: none; }
@@ -40,7 +56,8 @@
 
   .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%;
          background: var(--term); color: #e4e4e7; border-radius: 12px; padding: 14px 14px 14px 20px;
-         font-family: var(--mono); font-size: 15px; box-shadow: 0 10px 30px rgba(0,0,0,.12); }
+         font-family: var(--mono); font-size: 15px; box-shadow: 0 10px 30px var(--shadow);
+         border: 1px solid var(--term-line); }
   .cmd code { min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
   .cmd code::-webkit-scrollbar { display: none; }
   .cmd .ps { color: #8c8c96; user-select: none; }
@@ -51,7 +68,7 @@
   .hint a { color: var(--soft); }
 
   .shot { margin: 48px auto 0; max-width: 920px; }
-  .shot img { width: 100%; height: auto; display: block; filter: drop-shadow(0 18px 30px rgba(0,0,0,.14)); }
+  .shot img { width: 100%; height: auto; display: block; filter: drop-shadow(0 18px 30px var(--shadow)); }
 
   section { padding: 72px 0; border-top: 1px solid var(--line); }
   h2 { font-size: 30px; letter-spacing: -0.02em; margin: 0 0 8px; font-weight: 650; }
@@ -74,7 +91,7 @@
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: s; }
   .step { border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
   .step::before { counter-increment: s; content: counter(s); display: inline-grid; place-items: center;
-                  width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff;
+                  width: 28px; height: 28px; border-radius: 50%; background: var(--badge); color: var(--badge-ink);
                   font-size: 14px; font-weight: 650; margin-bottom: 12px; }
   .step h3 { margin: 0 0 6px; font-size: 17px; font-weight: 650; }
   .step p { margin: 0; color: var(--soft); font-size: 15px; }
@@ -97,7 +114,8 @@
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="top" id="top">
+ <div class="wrap">
   <nav>
     <a class="brand" href="./">lindowin</a>
     <div class="links">
@@ -107,8 +125,11 @@
       <a href="https://github.com/alozdev/lindowin">GitHub</a>
     </div>
   </nav>
+ </div>
+</div>
 
-  <header class="hero">
+<main class="wrap">
+  <div class="hero">
     <h1>lindowin</h1>
     <p class="tagline">Headless Linux Docker for Windows.</p>
     <p class="sub">Terminal only. No GUI. One command.</p>
@@ -120,7 +141,7 @@
     <p class="hint">Paste it in PowerShell. No admin needed to start. Prefer a ZIP? <a href="https://github.com/alozdev/lindowin/archive/refs/heads/main.zip">Download it</a> and double-click <code class="i">install.cmd</code>.</p>
 
     <div class="shot"><img src="demo.gif" width="920" height="280" alt="A terminal without Docker installs lindowin with one command, then runs nginx and gets 'Welcome to nginx!'"></div>
-  </header>
+  </div>
 
   <section id="why">
     <h2>Why lindowin</h2>
@@ -163,7 +184,7 @@
     </div>
     <p class="hint" style="text-align:left;margin-top:28px">Requirements: Windows 10 2004+ / Windows 11 (Home works) or Windows Server 2022 / 2025, x64, virtualization enabled. <a href="https://github.com/alozdev/lindowin#readme">Full docs</a> · <a href="https://github.com/alozdev/lindowin/blob/main/README.es.md">Español</a></p>
   </section>
-</div>
+</main>
 
 <footer>
   <div class="wrap">
@@ -176,6 +197,10 @@
 </footer>
 
 <script>
+  var bar = document.getElementById("top");
+  function onScroll() { bar.classList.toggle("scrolled", window.scrollY > 4); }
+  window.addEventListener("scroll", onScroll, { passive: true }); onScroll();
+
   document.querySelectorAll("[data-copy]").forEach(function (b) {
     b.addEventListener("click", function () {
       var text = document.getElementById(b.dataset.copy).textContent;

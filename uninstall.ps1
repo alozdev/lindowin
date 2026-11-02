@@ -56,7 +56,8 @@ Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Forc
 Write-Ok "Pipe relay stopped"
 
 # Admin part: start task, port rules service, firewall / portproxy rules, docker-users group
-$setupScript = Join-Path $InstallDir "installer\system-setup.ps1"
+$setupScript = Join-Path $InstallDir "installer\src\system-setup.ps1"
+if (-not (Test-Path $setupScript)) { $setupScript = Join-Path $InstallDir "installer\system-setup.ps1" }   # 1.1.0 layout
 if (Test-Path $setupScript) {
     Write-Host "    Windows will ask for administrator permission once (to remove tasks and firewall rules)."
     $result = Join-Path ([IO.Path]::GetTempPath()) ("wsl-docker-engine-uninstall-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".txt")

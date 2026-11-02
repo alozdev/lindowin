@@ -1,10 +1,12 @@
 # lindowin
 
+[![Release](https://img.shields.io/github/v/release/alozdev/lindowin?color=111114)](https://github.com/alozdev/lindowin/releases) [![License: MIT](https://img.shields.io/github/license/alozdev/lindowin?color=111114)](LICENSE) [![Windows 10 | 11 | Server](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-0078D4)](#requirements) [![Website](https://img.shields.io/badge/website-alozdev.github.io%2Flindowin-111114)](https://alozdev.github.io/lindowin/)
+
 **Headless Linux Docker for Windows.** Terminal only. No GUI. One command.
 
 `docker run nginx` just works, on Windows 10/11 and Windows Server, even Server Core.
 
-![From no Docker to nginx running, with one command](docs/demo.gif)
+![From no Docker to nginx running, with one command](assets/demo.gif)
 
 [Español](README.es.md)
 
@@ -27,7 +29,7 @@
 | No GUI, starts without signing in | ✅ | ❌ | ✅ |
 | Official `docker` CLI, compose, buildx | ✅ | ✅ | ✅ |
 
-![Windows Server 2022: native Docker can't run nginx, lindowin can](docs/compare.gif)
+![Windows Server 2022: native Docker can't run nginx, lindowin can](assets/compare.gif)
 
 Under the hood it installs the open-source **Docker Engine** inside WSL 2, the **official Docker CLI** for Windows, and a tiny relay between them. [How it works](#how-it-works).
 
@@ -98,9 +100,9 @@ Run the installer anyway. It is safe to run more than once, and it only adds wha
 
 Docker Desktop does the same thing internally: a Linux VM in WSL runs `dockerd`, and a Windows process connects the pipe to it. This project replaces that GUI app with:
 
-- **`wsl/setup.sh`**: configures the distro. It enables systemd, installs Docker Engine and socat, sets up automatic security updates and maps Windows drives for compose.
-- **`relay/docker-pipe-relay.cs`**: a ~300-line relay, compiled on your PC by the C# compiler that ships with Windows. No prebuilt binaries are downloaded from this repo.
-- **`ports/docker-port-sync.cs`**: a small service that watches your containers and opens or closes the firewall for their published ports, so they behave like on Linux. Also compiled on your PC.
+- **`src/wsl/setup.sh`**: configures the distro. It enables systemd, installs Docker Engine and socat, sets up automatic security updates and maps Windows drives for compose.
+- **`src/relay/docker-pipe-relay.cs`**: a ~300-line relay, compiled on your PC by the C# compiler that ships with Windows. No prebuilt binaries are downloaded from this repo.
+- **`src/ports/docker-port-sync.cs`**: a small service that watches your containers and opens or closes the firewall for their published ports, so they behave like on Linux. Also compiled on your PC.
 - **`install.ps1` / `uninstall.ps1`**: the Windows side.
 
 ## Daily use
@@ -225,7 +227,7 @@ That opens an unauthenticated root-level port. Also, WSL's localhost forwarding 
 
 ## Contributing
 
-Issues and pull requests are welcome: bug reports, tests on other Windows versions, ideas. If lindowin is useful to you, a ⭐ helps others find it.
+Issues and pull requests are welcome: bug reports, tests on other Windows versions, ideas. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [changelog](CHANGELOG.md). If lindowin is useful to you, a ⭐ helps others find it.
 
 [![Contributors](https://contrib.rocks/image?repo=alozdev/lindowin)](https://github.com/alozdev/lindowin/graphs/contributors)
 

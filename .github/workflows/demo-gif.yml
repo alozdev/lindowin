@@ -9,7 +9,7 @@ on:
   push:
     branches: [main]
     paths:
-      - docs/make-demo-gif.py
+      - assets/make-demo-gif.py
       - install.ps1
 
 permissions:
@@ -35,22 +35,22 @@ jobs:
       - name: Render GIF
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python docs/make-demo-gif.py
+        run: python assets/make-demo-gif.py
 
       - name: Commit if something changed
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] && git diff --quiet -- docs/demo-versions.json; then
+          if [ "${{ github.event_name }}" = "schedule" ] && git diff --quiet -- assets/demo-versions.json; then
             echo "No new versions, nothing to do."
             exit 0
           fi
-          if [ -z "$(git status --porcelain -- docs/)" ]; then
+          if [ -z "$(git status --porcelain -- assets/)" ]; then
             echo "GIF unchanged."
             exit 0
           fi
-          summary=$(python -c "import json; v=json.load(open('docs/demo-versions.json')); print(f\"Docker {v['docker']}, compose {v['compose']}, buildx {v['buildx']}, WSL {v['wsl']}\")")
+          summary=$(python -c "import json; v=json.load(open('assets/demo-versions.json')); print(f\"Docker {v['docker']}, compose {v['compose']}, buildx {v['buildx']}, WSL {v['wsl']}\")")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/demo.gif docs/compare.gif docs/social-preview.png docs/demo-versions.json
+          git add assets/demo.gif assets/compare.gif assets/social-preview.png assets/demo-versions.json
           git commit -m "Update README images ($summary)"
           git push

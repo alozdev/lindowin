@@ -1,10 +1,10 @@
 """Renders the README images:
 
-  docs/demo.gif            `docker` is missing -> one-line install (sped up) ->
+  assets/demo.gif            `docker` is missing -> one-line install (sped up) ->
                            `docker run nginx` -> "Welcome to nginx!"
-  docs/compare.gif         Windows Server: native Docker fails with nginx,
+  assets/compare.gif         Windows Server: native Docker fails with nginx,
                            lindowin runs it
-  docs/social-preview.png  1280x640 image for the GitHub "Social preview" setting
+  assets/social-preview.png  1280x640 image for the GitHub "Social preview" setting
 
 The installer text is its real output (trimmed). Version numbers are fetched
 from the same official sources the installer uses, so the images stay current.
@@ -12,7 +12,7 @@ Regenerated automatically by .github/workflows/demo-gif.yml.
 
 Usage:
     pip install pillow
-    python docs/make-demo-gif.py [--out-dir docs] [--fonts DIR]
+    python assets/make-demo-gif.py [--out-dir assets] [--fonts DIR]
 
 --fonts: folder with CascadiaMono-Regular.ttf / CascadiaMono-SemiBold.ttf.
 If omitted, Cascadia Mono (SIL OFL) is downloaded from Microsoft's GitHub.
@@ -298,7 +298,7 @@ def nginx_run(t, cmd, container_id):
     t.out(container_id, DIM, ms=700)
 
 
-# ---- docs/demo.gif ----------------------------------------------------------------
+# ---- assets/demo.gif ----------------------------------------------------------------
 
 def build_demo(fonts, v):
     t = Terminal(fonts, 920, 280, "Windows PowerShell", "PS C:\\Users\\dev> ")
@@ -341,7 +341,7 @@ def build_demo(fonts, v):
     return rec
 
 
-# ---- docs/compare.gif -------------------------------------------------------------
+# ---- assets/compare.gif -------------------------------------------------------------
 
 def build_compare(fonts, v):
     pw, ph, gap = 520, 250, 16
@@ -374,7 +374,7 @@ def build_compare(fonts, v):
     return rec
 
 
-# ---- docs/social-preview.png ------------------------------------------------------
+# ---- assets/social-preview.png ------------------------------------------------------
 
 def build_social(fonts, v):
     # White, minimal: title and description on the left, a terminal on the right
@@ -413,7 +413,7 @@ def build_social(fonts, v):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--out-dir", default=os.path.join(ROOT, "docs"))
+    p.add_argument("--out-dir", default=os.path.join(ROOT, "assets"))
     p.add_argument("--fonts", default=None)
     args = p.parse_args()
 

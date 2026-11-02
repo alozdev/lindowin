@@ -228,7 +228,7 @@ function Test-IsAdmin {
 
 function Invoke-SystemSetup([string[]]$Arguments) {
     # Runs system-setup.ps1 as administrator (one Windows permission prompt)
-    $script = Join-Path $InstallDir "installer\system-setup.ps1"
+    $script = Join-Path $InstallDir "installer\src\system-setup.ps1"
     $result = Join-Path $script:TempDir "system-setup.result"
     $all = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$script`"") + $Arguments + @("-ResultFile", "`"$result`"")
     try {
@@ -359,7 +359,7 @@ try {
 
     # ---- Installer files (local checkout or downloaded) ------------------------
     $src = $PSScriptRoot
-    if (-not $src -or -not (Test-Path (Join-Path $src "relay\docker-pipe-relay.cs"))) {
+    if (-not $src -or -not (Test-Path (Join-Path $src "src\relay\docker-pipe-relay.cs"))) {
         Write-Info "Downloading installer files from github.com/$Repo"
         $zip = Join-Path $script:TempDir "repo.zip"
         Invoke-Download "https://codeload.github.com/$Repo/zip/refs/heads/main" $zip
@@ -372,7 +372,7 @@ try {
     if ((Resolve-Path $src).Path.TrimEnd("\") -ne $installerCopy.TrimEnd("\")) {
         if (Test-Path $installerCopy) { Remove-Item -Recurse -Force $installerCopy }
         New-Item -ItemType Directory -Force $installerCopy | Out-Null
-        foreach ($item in "install.ps1", "install.cmd", "uninstall.ps1", "uninstall.cmd", "system-setup.ps1", "wsl", "relay", "ports", "LICENSE") {
+        foreach ($item in "install.ps1", "install.cmd", "uninstall.ps1", "uninstall.cmd", "src", "LICENSE") {
             $p = Join-Path $src $item
             if (Test-Path $p) { Copy-Item $p $installerCopy -Recurse -Force }
         }
@@ -435,7 +435,7 @@ try {
     # ---- Docker Engine inside WSL ------------------------------------------------
     Write-Step "Installing Docker Engine inside WSL"
     $setup = Join-Path $script:TempDir "setup.sh"
-    $text = [IO.File]::ReadAllText((Join-Path $src "wsl\setup.sh")) -replace "`r`n", "`n"
+    $text = [IO.File]::ReadAllText((Join-Path $src "src\wsl\setup.sh")) -replace "`r`n", "`n"
     [IO.File]::WriteAllText($setup, $text, (New-Object Text.UTF8Encoding($false)))
     $setupArgs = @("-d", $Distro, "-u", "root", "--cd", $script:TempDir, "--", "bash", "./setup.sh")
     if ($fresh) { $setupArgs += "--fresh" }
@@ -489,7 +489,7 @@ try {
     $relayExe = Join-Path $bin "docker-pipe-relay.exe"
     Get-Process docker-pipe-relay -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Milliseconds 500
-    $r = Invoke-Native $csc @("/nologo", "/target:winexe", "/optimize", "/r:System.Core.dll", "/out:$relayExe", (Join-Path $src "relay\docker-pipe-relay.cs"))
+    $r = Invoke-Native $csc @("/nologo", "/target:winexe", "/optimize", "/r:System.Core.dll", "/out:$relayExe", (Join-Path $src "src\relay\docker-pipe-relay.cs"))
     if ($r.Code -ne 0) { Write-Host $r.Text; Stop-Install "Could not build the pipe relay." }
     Write-Ok "Relay built: $relayExe"
 
