@@ -67,6 +67,12 @@
   h1 { font-family: var(--display); font-size: clamp(44px, 8vw, 76px); line-height: 1.02; margin: 0 0 18px; letter-spacing: -0.035em; font-weight: 650; }
   .tagline { font-size: clamp(19px, 2.6vw, 25px); color: var(--soft); margin: 0 0 8px; }
   .sub { color: var(--muted); margin: 0 0 36px; }
+  .tabs { display: flex; justify-content: center; gap: 6px; margin: 0 0 12px; }
+  .tab { border: 1px solid var(--line); background: transparent; color: var(--soft); border-radius: 999px;
+         padding: 5px 14px; font: 600 13px var(--sans); cursor: pointer; }
+  .tab:hover { color: var(--ink); }
+  .tab.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  [hidden] { display: none !important; }
   .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%;
          background: var(--term); color: #e4e4e7; border-radius: 12px; padding: 14px 14px 14px 20px;
          font-family: var(--mono); font-size: 15px; box-shadow: 0 10px 30px var(--shadow); border: 1px solid var(--term-line); }
@@ -195,11 +201,20 @@
     <h1>lindowin</h1>
     <p class="tagline">The real Docker Engine on Windows, without Docker Desktop.</p>
     <p class="sub">Free for any company. Terminal only. <b>9&times; lighter</b> on Windows.</p>
-    <div class="cmd">
+    <div class="tabs" role="tablist" aria-label="How to install">
+      <button class="tab on" type="button" role="tab" aria-selected="true" data-tab="ps">PowerShell</button>
+      <button class="tab" type="button" role="tab" aria-selected="false" data-tab="scoop">Scoop</button>
+    </div>
+    <div class="cmd" data-panel="ps">
       <code><span class="ps">PS&gt; </span><span id="install">irm %SITE_URL%/install | iex</span></code>
       <button class="copy" type="button" data-copy="install">Copy</button>
     </div>
-    <p class="hint">Paste it in PowerShell, and <code class="i">docker</code> works in that window when it finishes. Prefer a ZIP? <a href="https://github.com/alozdev/lindowin/archive/refs/heads/main.zip">Download it</a> and double-click <code class="i">install.cmd</code>.</p>
+    <div class="cmd" data-panel="scoop" hidden>
+      <code><span class="ps">PS&gt; </span><span id="install-scoop">scoop bucket add alozdev https://github.com/alozdev/scoop-bucket; scoop install lindowin</span></code>
+      <button class="copy" type="button" data-copy="install-scoop">Copy</button>
+    </div>
+    <p class="hint" data-panel="ps">Paste it in PowerShell, and <code class="i">docker</code> works in that window when it finishes. Prefer a ZIP? <a href="https://github.com/alozdev/lindowin/archive/refs/heads/main.zip">Download it</a> and double-click <code class="i">install.cmd</code>.</p>
+    <p class="hint" data-panel="scoop" hidden>Runs the same official installer. Update with <code class="i">scoop update lindowin</code>, remove with <code class="i">scoop uninstall lindowin</code>: your containers and settings are kept.</p>
     <div class="shot"><img src="demo.gif" width="920" height="280" alt="A terminal without Docker installs lindowin with one command, then runs nginx and gets 'Welcome to nginx!'"></div>
   </div>
 
@@ -355,6 +370,18 @@
   window.addEventListener("scroll", onScroll, { passive: true }); onScroll();
 
   // Copy buttons
+  // Install tabs: PowerShell / Scoop
+  document.querySelectorAll("[data-tab]").forEach(function (t) {
+    t.addEventListener("click", function () {
+      document.querySelectorAll("[data-tab]").forEach(function (o) {
+        var on = o === t;
+        o.classList.toggle("on", on);
+        o.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      document.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.dataset.panel !== t.dataset.tab; });
+    });
+  });
+
   document.querySelectorAll("[data-copy]").forEach(function (b) {
     b.addEventListener("click", function () {
       navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent).then(function () {
