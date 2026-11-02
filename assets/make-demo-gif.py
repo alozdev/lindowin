@@ -443,6 +443,32 @@ def build_wordmark(fonts, dark):
     return img.resize((W, H), Image.LANCZOS)
 
 
+def build_banner(fonts, dark):
+    """Full-width README header: the logo mark and the name, centered on a transparent strip."""
+    W, H = 1600, 360             # shown at full README width (~900 px), so it stays sharp
+    ink = (242, 242, 244) if dark else (17, 17, 20)
+    hole = (14, 14, 17) if dark else (255, 255, 255)
+    cursor = (31, 138, 76) if dark else (78, 194, 127)
+    font = fonts.ui_font(150, bold=True)
+    mark = 176                   # diameter of the circle
+    gap = 44
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    text_w = probe.textlength("lindowin", font=font) / S
+    x0 = (W - (mark + gap + text_w)) / 2
+    y0 = (H - mark) / 2
+    img = Image.new("RGBA", (W * S, H * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    u = mark * S / 64
+    ox, oy = x0 * S, y0 * S
+    d.ellipse([ox, oy, ox + mark * S - 1, oy + mark * S - 1], fill=ink)
+    d.rounded_rectangle([ox + 20 * u, oy + 14 * u, ox + 28 * u, oy + 50 * u], radius=4 * u, fill=hole)
+    d.rounded_rectangle([ox + 32 * u, oy + 42 * u, ox + 46 * u, oy + 50 * u], radius=4 * u, fill=cursor)
+    box = d.textbbox((0, 0), "lindowin", font=font)
+    ty = (H * S - (box[3] - box[1])) / 2 - box[1]
+    d.text(((x0 + mark + gap) * S, ty), "lindowin", font=font, fill=ink)
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out-dir", default=os.path.join(ROOT, "assets"))
@@ -461,6 +487,9 @@ def main():
     for dark, name in ((False, "lindowin-wordmark.png"), (True, "lindowin-wordmark-dark.png")):
         build_wordmark(fonts, dark).save(os.path.join(args.out_dir, "logo", name), optimize=True)
     print("wordmarks: logo/lindowin-wordmark.png, logo/lindowin-wordmark-dark.png")
+    for dark, name in ((False, "lindowin-banner.png"), (True, "lindowin-banner-dark.png")):
+        build_banner(fonts, dark).save(os.path.join(args.out_dir, "logo", name), optimize=True)
+    print("banners: logo/lindowin-banner.png, logo/lindowin-banner-dark.png")
     print("social-preview.png: 1280x640")
 
     with open(os.path.join(args.out_dir, "demo-versions.json"), "w", encoding="utf-8") as f:

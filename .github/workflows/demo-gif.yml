@@ -51,6 +51,6 @@ jobs:
           summary=$(python -c "import json; v=json.load(open('assets/demo-versions.json')); print(f\"Docker {v['docker']}, compose {v['compose']}, buildx {v['buildx']}, WSL {v['wsl']}\")")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add assets/demo.gif assets/compare.gif assets/social-preview.png assets/logo/lindowin-wordmark.png assets/logo/lindowin-wordmark-dark.png assets/demo-versions.json
+          git add assets/demo.gif assets/compare.gif assets/social-preview.png assets/logo/lindowin-wordmark.png assets/logo/lindowin-wordmark-dark.png assets/logo/lindowin-banner.png assets/logo/lindowin-banner-dark.png assets/demo-versions.json
           git commit -m "Update README images ($summary)"
           git push

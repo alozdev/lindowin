@@ -1,13 +1,22 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/lindowin-wordmark-dark.png">
-  <img src="assets/logo/lindowin-wordmark.png" alt="lindowin" width="187" height="48">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/lindowin-banner-dark.png">
+    <img src="assets/logo/lindowin-banner.png" alt="lindowin" width="100%">
+  </picture>
+</p>
 
-[![Release](https://img.shields.io/github/v/release/alozdev/lindowin?color=111114)](https://github.com/alozdev/lindowin/releases) [![License: MIT](https://img.shields.io/github/license/alozdev/lindowin?color=111114)](LICENSE) [![Windows 10 | 11 | Server](https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-0078D4)](#requirements) [![Website](https://img.shields.io/badge/website-lindowin.dev-111114)](https://lindowin.dev)
+<h3 align="center">The real Docker Engine on Windows, without Docker Desktop.</h3>
 
-### The real Docker Engine on Windows, without Docker Desktop.
+<p align="center">Free for any company. Terminal only. <b>9&times; lighter on Windows</b>, and <b>24&nbsp;MB</b> when nothing is running.</p>
 
-Free for any company. Terminal only. **9× lighter on Windows**, and **24 MB** when nothing is running.
+<p align="center">
+  <a href="https://github.com/alozdev/lindowin/releases"><img src="https://img.shields.io/github/v/release/alozdev/lindowin?color=111114" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/alozdev/lindowin?color=111114" alt="License: MIT"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-0078D4" alt="Windows 10 | 11 | Server"></a>
+  <a href="https://lindowin.dev"><img src="https://img.shields.io/badge/website-lindowin.dev-111114" alt="Website"></a>
+</p>
+
+<br>
 
 ```powershell
 irm https://lindowin.dev/install | iex
