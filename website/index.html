@@ -41,7 +41,7 @@
   .cmd { display: inline-flex; align-items: center; gap: 12px; max-width: 100%;
          background: var(--term); color: #e4e4e7; border-radius: 12px; padding: 14px 14px 14px 20px;
          font-family: var(--mono); font-size: 15px; box-shadow: 0 10px 30px rgba(0,0,0,.12); }
-  .cmd code { overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .cmd code { min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
   .cmd code::-webkit-scrollbar { display: none; }
   .cmd .ps { color: #8c8c96; user-select: none; }
   .copy { flex: none; border: 0; border-radius: 8px; padding: 7px 12px; cursor: pointer;
@@ -87,6 +87,10 @@
   @media (max-width: 820px) {
     .grid, .steps { grid-template-columns: 1fr; }
     .links a.opt { display: none; }
+    .wrap { padding: 0 20px; }
+    .hero { padding-top: 36px; }
+    .cmd { display: flex; width: 100%; font-size: 14px; }
+    section { padding: 52px 0; }
     .table-wrap { overflow-x: auto; }
     table { min-width: 560px; }
   }
