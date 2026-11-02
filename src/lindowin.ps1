@@ -141,6 +141,14 @@ function Stop-DockerCleanly($name) {
     & wsl.exe -d $name -u root -- sh -c "if [ -x /usr/local/sbin/lindowin-stop-docker ]; then /usr/local/sbin/lindowin-stop-docker; else systemctl stop docker.socket docker; fi" 2>$null | Out-Null
 }
 
+function Test-RelayBlocked([datetime]$since) {
+    # Smart App Control may block lindowin's relay (built on this PC, not signed yet)
+    try {
+        return [bool](Get-WinEvent -FilterHashtable @{ LogName = "Microsoft-Windows-CodeIntegrity/Operational"; Id = 3033; StartTime = $since } -ErrorAction Stop |
+            Where-Object { $_.Message -match "docker-pipe-relay\.exe" })
+    } catch { return $false }
+}
+
 function Show-Notices($cfg) {
     # Found by the relay once a day: updates, disk space worth giving back (no internet call here)
     if (-not (Test-IsOwner $cfg)) { return }
@@ -231,6 +239,9 @@ try {
                 if ($st["pipe_owner"]) {
                     Write-Warn "lindowin could not start: $($st['pipe_owner']) is using the Docker pipe."
                     Write-Host "      Quit it, then run: lindowin start"
+                } elseif (Test-RelayBlocked (Get-Date).AddHours(-1)) {
+                    Write-Warn "Windows Smart App Control blocked lindowin's relay (it is built on this PC and not signed yet)."
+                    Write-Host "      Run: lindowin start  (Windows usually allows it on the next try)"
                 } else {
                     Write-Warn "Docker is not available (the relay is not running). Run: lindowin start"
                 }
@@ -365,7 +376,8 @@ try {
                 if ($LASTEXITCODE -eq 0) { Write-Ok "Docker $v is running (shared by $($cfg.owner))."; break }
                 throw "Docker is not running. It is shared by $($cfg.owner): ask them or an administrator."
             }
-            if (-not (Get-Process docker-pipe-relay -ErrorAction SilentlyContinue)) {
+            $since = (Get-Date).AddSeconds(-5)
+            for ($try = 1; $try -le 3 -and -not (Get-Process docker-pipe-relay -ErrorAction SilentlyContinue); $try++) {
                 try { Start-ScheduledTask -TaskName "wsl-docker-engine" -ErrorAction Stop }
                 catch {
                     $relayExe = Join-Path $InstallDir "bin\docker-pipe-relay.exe"
@@ -373,6 +385,10 @@ try {
                         "--wsl-ip-file", "`"$(Join-Path (Get-StageDir $cfg) 'bin\wsl-ip.txt')`"")
                 }
                 for ($i = 0; $i -lt 20 -and -not (Test-Path "\\.\pipe\docker_engine"); $i++) { Start-Sleep -Milliseconds 500 }
+                if (-not (Test-Path "\\.\pipe\docker_engine") -and (Test-RelayBlocked $since)) {
+                    Write-Host "  Windows Smart App Control blocked the relay. Trying again in a few seconds..."
+                    Start-Sleep 5
+                }
             }
             $v = & $Docker version --format "{{.Server.Version}}" 2>$null
             if ($LASTEXITCODE -eq 0) { Write-Ok "Docker $v is running." } else { throw "Docker did not start. Check: lindowin status" }

@@ -81,6 +81,7 @@ irm https://lindowin.dev/install | iex
 Otras formas:
 
 - **¿Dominio bloqueado?** `irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex`
+- **Scoop:** `scoop bucket add alozdev https://github.com/alozdev/scoop-bucket` y luego `scoop install lindowin`
 - **Doble clic:** [descarga el ZIP](https://github.com/alozdev/lindowin/archive/refs/heads/main.zip), descomprímelo y ejecuta **`install.cmd`**.
 
 <details>
@@ -275,7 +276,7 @@ Empieza con **`lindowin status`**: muestra qué está mal y el comando para arre
 | WSL se quedó sin internet, o los contenedores no tienen red | `lindowin config network nat` (algunas VPN no funcionan con mirrored). |
 | Un puerto publicado no se alcanza desde la red | `C:\ProgramData\wsl-docker-engine\port-sync.log`. Si no aceptaste el permiso de administrador, ejecuta el instalador otra vez. |
 | Faltan `docker compose` o `docker buildx` | `lindowin update` (el desinstalador de Docker Desktop los borra). |
-| Smart App Control bloquea `docker-pipe-relay.exe` | Se compila en tu PC y no tiene firma. No lo hemos visto pasar; si te ocurre, por favor [abre un issue](https://github.com/alozdev/lindowin/issues). |
+| Smart App Control bloquea `docker-pipe-relay.exe` | Se compila en tu PC y aún no tiene firma, así que Windows puede bloquear el primer arranque de una compilación nueva. lindowin lo reintenta solo y Windows normalmente lo permite la segunda vez; si no, ejecuta `lindowin start`. Está planeado firmarlo. |
 | Docker no arranca dentro de Linux | `wsl -d docker -u root -- systemctl status docker` |
 
 Registros: `%LOCALAPPDATA%\Programs\wsl-docker-engine\bin\docker-pipe-relay.log`.

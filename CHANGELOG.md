@@ -4,6 +4,14 @@ All notable changes to lindowin. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-02
+
+### Fixed
+- Windows Smart App Control could block the relay or the port service the first time a new build ran, so an update could end with "the Windows CLI could not reach it". They are now rebuilt only when their code changes, and the installer, `lindowin start` and `lindowin status` retry and explain it when Windows blocks a first run.
+
+### Added
+- Install with Scoop: `scoop bucket add alozdev https://github.com/alozdev/scoop-bucket` then `scoop install lindowin`.
+
 ## [1.2.0] - 2026-11-02
 
 ### Added
@@ -51,7 +59,8 @@ All notable changes to lindowin. The format follows [Keep a Changelog](https://k
 - Relay that serves `\.\pipe\docker_engine`, the same endpoint as Docker Desktop.
 - Automatic start at sign-in, safe re-runs, clean uninstall.
 
-[Unreleased]: https://github.com/alozdev/lindowin/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/alozdev/lindowin/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/alozdev/lindowin/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/alozdev/lindowin/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/alozdev/lindowin/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/alozdev/lindowin/releases/tag/v1.0.0

@@ -81,6 +81,7 @@ irm https://lindowin.dev/install | iex
 Other ways:
 
 - **Blocked domain?** `irm https://raw.githubusercontent.com/alozdev/lindowin/main/install.ps1 | iex`
+- **Scoop:** `scoop bucket add alozdev https://github.com/alozdev/scoop-bucket` then `scoop install lindowin`
 - **Double-click:** [download the ZIP](https://github.com/alozdev/lindowin/archive/refs/heads/main.zip), extract it and run **`install.cmd`**.
 
 <details>
@@ -275,7 +276,7 @@ Start with **`lindowin status`**: it shows what is wrong and the command to fix 
 | WSL lost internet, or containers have no network | `lindowin config network nat` (some VPNs break mirrored networking). |
 | A published port is not reachable from the network | `C:\ProgramData\wsl-docker-engine\port-sync.log`. If you skipped the admin prompt, run the installer again. |
 | `docker compose` or `docker buildx` missing | `lindowin update` (Docker Desktop's uninstaller removes them). |
-| Smart App Control blocks `docker-pipe-relay.exe` | It is compiled on your PC and not signed. Not seen so far; if it happens, please [open an issue](https://github.com/alozdev/lindowin/issues). |
+| Smart App Control blocks `docker-pipe-relay.exe` | It is built on your PC and not signed yet, so Windows may block the first run of a new build. lindowin retries by itself and Windows usually allows it the second time; if not, run `lindowin start`. Signed builds are planned. |
 | Docker inside Linux does not start | `wsl -d docker -u root -- systemctl status docker` |
 
 Logs: `%LOCALAPPDATA%\Programs\wsl-docker-engine\bin\docker-pipe-relay.log`.

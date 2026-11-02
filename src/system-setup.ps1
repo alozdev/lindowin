@@ -127,7 +127,9 @@ function Install-SharedFiles {
     Cancel-RemoveAtRestart $ProgramDir
     New-Item -ItemType Directory -Force $SharedBin | Out-Null
     foreach ($f in "docker.exe", "docker-pipe-relay.exe", "lindowin.cmd") {
-        Copy-Item (Join-Path $InstallDir "bin\$f") (Join-Path $SharedBin $f) -Force
+        $from = Join-Path $InstallDir "bin\$f"
+        $to = Join-Path $SharedBin $f
+        if (-not (Test-Path $to) -or (Get-FileHash $from).Hash -ne (Get-FileHash $to).Hash) { Copy-Item $from $to -Force }
     }
     $sharedInstaller = Join-Path $ProgramDir "installer"
     if (Test-Path $sharedInstaller) { Remove-Item -Recurse -Force $sharedInstaller }
@@ -207,8 +209,14 @@ try {
         $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
         $source = Join-Path $PSScriptRoot "ports\docker-port-sync.cs"
         $exe = Join-Path $ProgramDir "docker-port-sync.exe"
-        $out = & $csc /nologo /target:winexe /optimize /r:System.Core.dll /r:System.Web.Extensions.dll "/out:$exe" $source 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "Could not build docker-port-sync: $out" }
+        # Rebuilt only when its code changed (a new build is a program Windows has never seen)
+        $stamp = "$exe.source.sha256"
+        $hash = (Get-FileHash $source -Algorithm SHA256).Hash
+        if (-not ((Test-Path $exe) -and (Test-Path $stamp) -and ((Get-Content $stamp -Raw).Trim() -eq $hash))) {
+            $out = & $csc /nologo /target:winexe /optimize /r:System.Core.dll /r:System.Web.Extensions.dll "/out:$exe" $source 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "Could not build docker-port-sync: $out" }
+            Set-Content -Path $stamp -Value $hash -Encoding ASCII
+        }
 
         if ($Mode -eq "portproxy") {
             # portproxy needs the IP Helper service

@@ -64,7 +64,7 @@ $ProgressPreference = "SilentlyContinue"   # makes Invoke-WebRequest much faster
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $env:WSL_UTF8 = "1"                       # wsl.exe prints UTF-8 instead of UTF-16
 
-$Version = "1.2.0"
+$Version = "1.2.1"
 $Repo = "alozdev/lindowin"
 $UbuntuImage = "Ubuntu-24.04"
 
@@ -141,6 +141,15 @@ function Stop-Relay {
     }
     Start-Sleep -Milliseconds 500
     return -not (Get-Process docker-pipe-relay -ErrorAction SilentlyContinue)
+}
+
+function Test-RelayBlocked([datetime]$since) {
+    # Smart App Control can block a program the first time it runs (it is compiled on this
+    # PC and not signed, so Windows has never seen it). Windows logs that in Code Integrity.
+    try {
+        return [bool](Get-WinEvent -FilterHashtable @{ LogName = "Microsoft-Windows-CodeIntegrity/Operational"; Id = 3033; StartTime = $since } -ErrorAction Stop |
+            Where-Object { $_.Message -match "docker-pipe-relay\.exe" })
+    } catch { return $false }
 }
 
 function Restart-Wsl($name) {
@@ -557,12 +566,24 @@ try {
     Write-Step "Building the Docker pipe relay"
     $relayExe = Join-Path $bin "docker-pipe-relay.exe"
     $relayNew = Join-Path $bin "docker-pipe-relay.new.exe"
-    $r = Invoke-Native $csc @("/nologo", "/target:winexe", "/optimize", "/r:System.Core.dll", "/r:System.Management.dll", "/out:$relayNew", (Join-Path $src "src\relay\docker-pipe-relay.cs"))
-    if ($r.Code -ne 0) { Write-Host $r.Text; Stop-Install "Could not build the pipe relay." }
-    $stopped = Stop-Relay
-    try { if (-not $stopped) { throw "busy" }; Move-Item $relayNew $relayExe -Force -ErrorAction Stop }
-    catch { Write-Info "The running relay belongs to the start task: it is replaced in the administrator step." }
-    Write-Ok "Relay built: $relayExe"
+    $relaySrc = Join-Path $src "src\relay\docker-pipe-relay.cs"
+    $relayStamp = Join-Path $bin "docker-pipe-relay.source.sha256"
+    $relayHash = (Get-FileHash $relaySrc -Algorithm SHA256).Hash
+    # Rebuilt only when its code changed: every build is a new program that Windows
+    # (Smart App Control) has never seen, and may block the first time it runs.
+    $upToDate = (Test-Path $relayExe) -and -not (Test-Path $relayNew) -and (Test-Path $relayStamp) -and
+                ((Get-Content $relayStamp -Raw).Trim() -eq $relayHash)
+    if ($upToDate) {
+        Write-Ok "Relay up to date: $relayExe"
+    } else {
+        $r = Invoke-Native $csc @("/nologo", "/target:winexe", "/optimize", "/r:System.Core.dll", "/r:System.Management.dll", "/out:$relayNew", $relaySrc)
+        if ($r.Code -ne 0) { Write-Host $r.Text; Stop-Install "Could not build the pipe relay." }
+        $stopped = Stop-Relay
+        try { if (-not $stopped) { throw "busy" }; Move-Item $relayNew $relayExe -Force -ErrorAction Stop }
+        catch { Write-Info "The running relay belongs to the start task: it is replaced in the administrator step." }
+        Set-Content -Path $relayStamp -Value $relayHash -Encoding ASCII
+        Write-Ok "Relay built: $relayExe"
+    }
 
     # ---- Environment ---------------------------------------------------------------
     Write-Step "Configuring your user environment"
@@ -712,7 +733,26 @@ try {
         try { Start-ScheduledTask -TaskName "wsl-docker-engine" -ErrorAction Stop; $started = $true } catch { }
     }
     if (-not $started) { Start-Process $relayExe -ArgumentList $relayArgs -WindowStyle Hidden }
-    for ($i = 0; $i -lt 20 -and -not (Test-Path "\\.\pipe\docker_engine"); $i++) { Start-Sleep -Milliseconds 500 }
+    $startedAt = (Get-Date).AddSeconds(-5)
+    $blockedSaid = $false
+    $deadline = (Get-Date).AddSeconds(90)
+    while (-not (Test-Path "\\.\pipe\docker_engine") -and (Get-Date) -lt $deadline) {
+        Start-Sleep 2
+        if (Get-Process docker-pipe-relay -ErrorAction SilentlyContinue) { continue }
+        # Not running: Windows may have blocked its first run. It usually allows the next one.
+        if (-not $blockedSaid -and (Test-RelayBlocked $startedAt)) {
+            Write-Info "Windows Smart App Control blocked the relay's first run (it was just built on this PC). Trying again..."
+            $blockedSaid = $true
+        }
+        Start-Sleep 3
+        $again = $false
+        if ($started) { try { Start-ScheduledTask -TaskName "wsl-docker-engine" -ErrorAction Stop; $again = $true } catch { } }
+        if (-not $again) { Start-Process $relayExe -ArgumentList $relayArgs -WindowStyle Hidden }
+    }
+    if (-not (Test-Path "\\.\pipe\docker_engine") -and (Test-RelayBlocked $startedAt)) {
+        Stop-Install ("Windows Smart App Control is blocking lindowin's relay (it is built on this PC and not signed yet).`n" +
+                      "       Wait a minute and run: lindowin start. If it keeps happening, please tell us: https://github.com/alozdev/lindowin/issues")
+    }
 
     Remove-Item Env:DOCKER_HOST -ErrorAction SilentlyContinue
     $r = Invoke-Native $dockerExe @("version", "--format", "{{.Server.Version}}")
