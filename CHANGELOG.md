@@ -4,6 +4,9 @@ All notable changes to lindowin. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- `AGENTS.md` (and `CLAUDE.md`) with the project rules for AI coding agents.
+
 ## [1.2.1] - 2026-11-02
 
 ### Fixed
