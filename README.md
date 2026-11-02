@@ -10,10 +10,10 @@
 <p align="center">Free for any company. Terminal only. <b>9&times; lighter on Windows</b>, and <b>24&nbsp;MB</b> when nothing is running.</p>
 
 <p align="center">
-  <a href="https://github.com/alozdev/lindowin/releases"><img src="https://img.shields.io/github/v/release/alozdev/lindowin?color=111114" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/alozdev/lindowin?color=111114" alt="License: MIT"></a>
+  <a href="https://github.com/alozdev/lindowin/releases"><img src="https://img.shields.io/github/v/release/alozdev/lindowin?color=1f8a4c" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/alozdev/lindowin?color=1f8a4c" alt="License: MIT"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20%7C%20Server-0078D4" alt="Windows 10 | 11 | Server"></a>
-  <a href="https://lindowin.dev"><img src="https://img.shields.io/badge/website-lindowin.dev-111114" alt="Website"></a>
+  <a href="https://lindowin.dev"><img src="https://img.shields.io/badge/website-lindowin.dev-1f8a4c" alt="Website"></a>
 </p>
 
 <br>
