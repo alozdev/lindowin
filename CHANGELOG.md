@@ -4,6 +4,11 @@ All notable changes to lindowin. The format follows [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-03
+
+### Fixed
+- Apps that connect to `localhost` could hang: Windows tries `::1` first, and WSL cannot pass IPv6 loopback to Linux. lindowin now lowers only `::1` in Windows' address preference table (if it still has its default), so `localhost` tries `127.0.0.1` first while other IPv6 traffic is unchanged. Uninstalling restores it.
+
 ### Added
 - `AGENTS.md` (and `CLAUDE.md`) with the project rules for AI coding agents.
 
@@ -62,7 +67,8 @@ All notable changes to lindowin. The format follows [Keep a Changelog](https://k
 - Relay that serves `\.\pipe\docker_engine`, the same endpoint as Docker Desktop.
 - Automatic start at sign-in, safe re-runs, clean uninstall.
 
-[Unreleased]: https://github.com/alozdev/lindowin/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/alozdev/lindowin/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/alozdev/lindowin/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/alozdev/lindowin/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/alozdev/lindowin/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/alozdev/lindowin/compare/v1.0.0...v1.1.0

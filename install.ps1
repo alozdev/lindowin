@@ -64,7 +64,7 @@ $ProgressPreference = "SilentlyContinue"   # makes Invoke-WebRequest much faster
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $env:WSL_UTF8 = "1"                       # wsl.exe prints UTF-8 instead of UTF-16
 
-$Version = "1.2.1"
+$Version = "1.2.2"
 $Repo = "alozdev/lindowin"
 $UbuntuImage = "Ubuntu-24.04"
 

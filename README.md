@@ -241,7 +241,7 @@ lindowin uninstall           Remove lindowin, keep the engine with all container
 lindowin uninstall --all     Remove everything, including all Docker data (asks you to confirm)
 ```
 
-It removes `docker.exe`, the compose/buildx plugins it installed, the relay, the start task, the port service and every firewall rule it created, the `docker-users` group (only if it created it), the PATH changes, and restores your original `.wslconfig`. Plugins you installed yourself are left alone.
+It removes `docker.exe`, the compose/buildx plugins it installed, the relay, the start task, the port service and every firewall rule it created, the `docker-users` group (only if it created it), the PATH changes and the `::1` preference, and restores your original `.wslconfig`. Plugins you installed yourself are left alone.
 
 **Before `--all`:** stop your apps (`docker compose down`) so databases shut down cleanly, and back up named volumes if you need them, for example `docker run --rm -v myvol:/v -v /c/backup:/b alpine tar czf /b/myvol.tgz -C /v .`. Folders from Windows (bind mounts like `./data`) are never touched.
 
@@ -250,6 +250,7 @@ It removes `docker.exe`, the compose/buildx plugins it installed, the relay, the
 - **Compose bind mounts work** (`./data:/data`): compose turns `C:\...` into `/c/...`, and `/c` is your C: drive inside Linux. With plain `docker run -v`, write `/c/Users/you/project:/app`.
 - **Performance:** named volumes live inside Linux and are fast. Bind mounts of Windows folders work but are slower, as with Docker Desktop. Prefer named volumes for databases.
 - **File permissions on Windows drives** work (WSL's `metadata` option), so images like Postgres run on bind-mounted Windows folders.
+- **`localhost` means `127.0.0.1`.** WSL cannot pass IPv6 loopback (`::1`) to containers: Linux drops it and apps hang. So lindowin lowers only `::1` in Windows' address preference table (if you never changed it): `localhost` tries `127.0.0.1` first, and every other IPv6 address works as before. Uninstalling puts it back.
 - **Uninstalling Docker Desktop deletes your compose and buildx plugins** (they share a folder). Run `lindowin update` to put them back.
 
 ## Security
@@ -277,6 +278,7 @@ Start with **`lindowin status`**: it shows what is wrong and the command to fix 
 | A published port is not reachable from the network | `C:\ProgramData\wsl-docker-engine\port-sync.log`. If you skipped the admin prompt, run the installer again. |
 | `docker compose` or `docker buildx` missing | `lindowin update` (Docker Desktop's uninstaller removes them). |
 | Smart App Control blocks `docker-pipe-relay.exe` | It is built on your PC and not signed yet, so Windows may block the first run of a new build. lindowin retries by itself and Windows usually allows it the second time; if not, run `lindowin start`. Signed builds are planned. |
+| An app hangs connecting to `localhost` (works with `127.0.0.1`) | Run the installer again: it makes `localhost` try `127.0.0.1` first. Check with `ping localhost` (it should answer from `127.0.0.1`). |
 | Docker inside Linux does not start | `wsl -d docker -u root -- systemctl status docker` |
 
 Logs: `%LOCALAPPDATA%\Programs\wsl-docker-engine\bin\docker-pipe-relay.log`.

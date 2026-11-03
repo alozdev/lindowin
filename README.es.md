@@ -241,7 +241,7 @@ lindowin uninstall           Quita lindowin y conserva el motor con todos tus co
 lindowin uninstall --all     Quita todo, incluidos todos los datos de Docker (pide confirmación)
 ```
 
-Quita `docker.exe`, los plugins de compose y buildx que instaló, el relay, la tarea de arranque, el servicio de puertos con todas las reglas de firewall que creó, el grupo `docker-users` (solo si lo creó él) y los cambios al PATH, y restaura tu `.wslconfig` original. Los plugins que instalaste tú no se tocan.
+Quita `docker.exe`, los plugins de compose y buildx que instaló, el relay, la tarea de arranque, el servicio de puertos con todas las reglas de firewall que creó, el grupo `docker-users` (solo si lo creó él), los cambios al PATH y la preferencia de `::1`, y restaura tu `.wslconfig` original. Los plugins que instalaste tú no se tocan.
 
 **Antes de `--all`:** detén tus apps (`docker compose down`) para que las bases de datos se cierren bien, y respalda los volúmenes con nombre si los necesitas, por ejemplo `docker run --rm -v mivol:/v -v /c/respaldo:/b alpine tar czf /b/mivol.tgz -C /v .`. Las carpetas de Windows (bind mounts como `./data`) nunca se tocan.
 
@@ -250,6 +250,7 @@ Quita `docker.exe`, los plugins de compose y buildx que instaló, el relay, la t
 - **Los bind mounts de compose funcionan** (`./data:/data`): compose convierte `C:\...` en `/c/...`, y `/c` es tu disco C dentro de Linux. Con `docker run -v`, escribe `/c/Users/tu-usuario/proyecto:/app`.
 - **Rendimiento:** los volúmenes con nombre viven dentro de Linux y son rápidos. Montar carpetas de Windows funciona, pero es más lento, igual que en Docker Desktop. Para bases de datos, mejor volúmenes con nombre.
 - **Los permisos en discos de Windows** funcionan (opción `metadata` de WSL), así imágenes como Postgres corren sobre carpetas de Windows montadas.
+- **`localhost` es `127.0.0.1`.** WSL no puede pasar el loopback IPv6 (`::1`) a los contenedores: Linux lo descarta y las apps se quedan esperando. Por eso lindowin baja solo la prioridad de `::1` en la tabla de preferencia de direcciones de Windows (si nunca la cambiaste): `localhost` prueba primero `127.0.0.1` y el resto de IPv6 funciona igual que antes. Al desinstalar se restaura.
 - **Desinstalar Docker Desktop borra tus plugins compose y buildx** (comparten carpeta). Ejecuta `lindowin update` para reponerlos.
 
 ## Seguridad
@@ -277,6 +278,7 @@ Empieza con **`lindowin status`**: muestra qué está mal y el comando para arre
 | Un puerto publicado no se alcanza desde la red | `C:\ProgramData\wsl-docker-engine\port-sync.log`. Si no aceptaste el permiso de administrador, ejecuta el instalador otra vez. |
 | Faltan `docker compose` o `docker buildx` | `lindowin update` (el desinstalador de Docker Desktop los borra). |
 | Smart App Control bloquea `docker-pipe-relay.exe` | Se compila en tu PC y aún no tiene firma, así que Windows puede bloquear el primer arranque de una compilación nueva. lindowin lo reintenta solo y Windows normalmente lo permite la segunda vez; si no, ejecuta `lindowin start`. Está planeado firmarlo. |
+| Una app se queda esperando al conectar a `localhost` (con `127.0.0.1` sí funciona) | Ejecuta el instalador de nuevo: hace que `localhost` pruebe primero `127.0.0.1`. Compruébalo con `ping localhost` (debe responder desde `127.0.0.1`). |
 | Docker no arranca dentro de Linux | `wsl -d docker -u root -- systemctl status docker` |
 
 Registros: `%LOCALAPPDATA%\Programs\wsl-docker-engine\bin\docker-pipe-relay.log`.

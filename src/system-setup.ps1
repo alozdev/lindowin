@@ -150,6 +150,45 @@ function Install-SharedFiles {
     [Environment]::SetEnvironmentVariable("COMPOSE_CONVERT_WINDOWS_PATHS", "1", "Machine")
 }
 
+# ---- localhost -> 127.0.0.1 first ---------------------------------------------------
+# Windows resolves "localhost" to ::1 first. WSL hands that connection to Linux, whose kernel
+# drops IPv6 loopback packets arriving on another interface, so apps hang on ::1 before
+# trying 127.0.0.1. Lowering only ::1 below IPv4 in the address preference table (RFC 6724)
+# makes localhost mean 127.0.0.1; every other IPv6 address keeps its priority.
+# Only changed when ::1 has the Windows default, and put back on uninstall.
+$LoopPrefix = "::1/128"
+$LoopDefault = 50
+$LoopOurs = 30          # below IPv4 (::ffff:0:0/96, 35)
+$LoopMarker = Join-Path $StateDir "localhost-ipv4.txt"
+
+function Get-Precedence([string]$prefix) {
+    $p = Get-NetPrefixPolicy -ErrorAction SilentlyContinue | Where-Object { $_.Prefix -eq $prefix }
+    if ($p) { return [int]$p.Precedence } else { return -1 }
+}
+
+function Set-Precedence([string]$prefix, [int]$value, [int]$label) {
+    netsh interface ipv6 set prefixpolicy prefix=$prefix precedence=$value label=$label | Out-Null
+}
+
+function Set-LocalhostIPv4 {
+    # 1.2.2 previews raised all of IPv4 instead: put that back
+    $old = Join-Path $StateDir "prefer-ipv4.txt"
+    if (Test-Path $old) {
+        if ((Get-Precedence "::ffff:0:0/96") -eq 55) { Set-Precedence "::ffff:0:0/96" 35 4 }
+        Remove-Item $old -Force -ErrorAction SilentlyContinue
+    }
+    $now = Get-Precedence $LoopPrefix
+    if ($now -eq $LoopOurs) { return }
+    if ($now -ne $LoopDefault) { return }   # someone customized it: leave it alone
+    Set-Precedence $LoopPrefix $LoopOurs 0
+    if ((Get-Precedence $LoopPrefix) -eq $LoopOurs) { Set-Content -Path $LoopMarker -Value "set by lindowin" -Encoding ASCII }
+}
+
+function Undo-LocalhostIPv4 {
+    if ((Test-Path $LoopMarker) -and (Get-Precedence $LoopPrefix) -eq $LoopOurs) { Set-Precedence $LoopPrefix $LoopDefault 0 }
+    Remove-Item $LoopMarker -Force -ErrorAction SilentlyContinue
+}
+
 function Stop-Tasks {
     foreach ($t in $RelayTask, $PortsTask) {
         if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) {
@@ -173,6 +212,7 @@ try {
     if ($Action -eq "Uninstall") {
         Stop-Tasks
         Remove-PortRules
+        Undo-LocalhostIPv4
         if (Test-Path $GroupMarker) { Remove-LocalGroup -Name $Group -ErrorAction SilentlyContinue }
         Remove-SharedFiles "uninstall"
         # Program Files folder: everything now, except the bin folder a terminal may be running from
@@ -231,6 +271,9 @@ try {
             -Action $taskAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Principal $principal -Settings (New-TaskSettings) | Out-Null
         Start-ScheduledTask -TaskName $PortsTask
     }
+
+    # Not fatal: without it, "localhost" still works in apps that fall back to 127.0.0.1
+    try { Set-LocalhostIPv4 } catch { }
 
     # ---- Shared install (all users) or per-user -----------------------------------------
     if ($AllUsers) {
