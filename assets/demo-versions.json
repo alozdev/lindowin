@@ -1,6 +1,6 @@
 {
-  "buildx": "v0.39.0",
-  "compose": "v5.7.1",
+  "buildx": "v0.39.1",
+  "compose": "v5.8.0",
   "docker": "29.10.0",
   "docker_cli_build": "fdd4b8e",
   "wsl": "3.0.5"
